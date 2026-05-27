@@ -1,0 +1,781 @@
+/**
+ * PBS Editor v2 — main UI controller.
+ * 3-column dialog: sidebar | table+pagination | preview+detail
+ */
+
+import { parsePbsFile, detectVersion, getFilename, getAvailableFileTypes, FILE_MAP } from './parsers.js';
+import { writePbsFile } from './writers.js';
+import { CSS } from './styles.js';
+import { getFileTypeConfig, getPrimaryGraphic, TYPE_COLORS, typeBadge } from './file-types.js';
+import {
+  h, button, searchBox, badge, showContextMenu,
+  createTable, createFieldEditor,
+  createEncounterEditor, createTrainerPokemonEditor,
+  createPagination, createPreviewPanel, createSectionToggle,
+} from './components.js';
+
+const PAGE_SIZE = 50;
+
+export class PbsEditor {
+  constructor(ctx, host) {
+    this.ctx = ctx;
+    this.host = host;
+    this.version = null;
+    this.currentFileType = null;
+    this.entries = {};
+    this.originalEntries = {};
+    this.selectedIdx = -1;
+    this.dirty = new Set();
+    this.searchQuery = '';
+    this.gameRoot = '';
+    this._history = [];
+    this._historyIdx = -1;
+    this._navigating = false;
+    this._metricsCache = null;
+
+    this.build();
+  }
+
+  async loadImageBlob(absPath) {
+    try {
+      const invoke = window.__TAURI__?.core?.invoke;
+      if (!invoke) return null;
+      const bytes = await invoke('read_binary_file', { path: absPath });
+      if (!bytes || !bytes.length) return null;
+      const ext = absPath.split('.').pop().toLowerCase();
+      const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'bmp' ? 'image/bmp' : 'image/png';
+      const blob = new Blob([new Uint8Array(bytes)], { type: mime });
+      return URL.createObjectURL(blob);
+    } catch { return null; }
+  }
+
+  async loadMetrics() {
+    if (this._metricsCache) return this._metricsCache;
+    this._metricsCache = {};
+    try {
+      const fname = this.version >= 21 ? 'pokemon_metrics.txt' : '';
+      if (!fname) return this._metricsCache;
+      const raw = await this.readFile('PBS/' + fname);
+      const lines = raw.split(/\r?\n/);
+      for (const line of lines) {
+        const t = line.trim();
+        const m = t.match(/^\[(.+?)\](!exclude)?$/);
+        if (!m) continue;
+        const name = m[1];
+        // Scan following lines for Speed
+        const idx = lines.indexOf(line);
+        let speed = null;
+        for (let j = idx + 1; j < lines.length; j++) {
+          const lt = lines[j].trim();
+          if (lt.startsWith('[')) break;
+          if (lt.startsWith('Speed')) {
+            const eq = lt.indexOf('=');
+            if (eq >= 0) speed = parseInt(lt.slice(eq + 1).trim());
+          }
+        }
+        if (speed != null) this._metricsCache[name] = speed;
+      }
+    } catch { /* metrics file may not exist */ }
+    return this._metricsCache;
+  }
+
+  spriteSpeedToFps(speed) {
+    if (speed == null) return undefined;
+    if (speed === 0) return 0;
+    const delayMs = Math.round((speed / 2.0) * 60);
+    return delayMs > 0 ? 1000 / delayMs : undefined;
+  }
+
+  async getSpriteFps(entry, fileType) {
+    if (fileType !== 'pokemon' && fileType !== 'pokemon_forms') return undefined;
+    const name = entry.InternalName || '';
+    const metrics = await this.loadMetrics();
+    const speed = metrics[name];
+    const fps = this.spriteSpeedToFps(speed);
+    return fps !== undefined ? fps : 16;
+  }
+
+  build() {
+    const style = document.createElement('style');
+    style.textContent = CSS;
+    this.host.appendChild(style);
+
+    this.root = h('div', { className: 'pbs-root' });
+
+    this.buildToolbar();
+    this.buildMainLayout();
+    this.buildStatusBar();
+
+    this.host.appendChild(this.root);
+
+    this.root.tabIndex = 0;
+    this.root.addEventListener('keydown', (e) => this.onKeyDown(e));
+
+    this.loadSavedVersion();
+  }
+
+  buildToolbar() {
+    this.toolbar = h('div', { className: 'pbs-toolbar' });
+    this.toolbar.appendChild(h('span', { className: 'pbs-toolbar-title', textContent: 'PBS Editor' }));
+    this.toolbar.appendChild(h('div', { className: 'pbs-toolbar-sep' }));
+    this.backBtn = h('button', { className: 'pbs-btn', textContent: '←', onClick: () => this.goBack(), disabled: true });
+    this.forwardBtn = h('button', { className: 'pbs-btn', textContent: '→', onClick: () => this.goForward(), disabled: true });
+    this.toolbar.appendChild(this.backBtn);
+    this.toolbar.appendChild(this.forwardBtn);
+    this.toolbar.appendChild(h('div', { className: 'pbs-toolbar-sep' }));
+    this.versionSelect = h('select', { className: 'pbs-search', style: { width: '70px', fontSize: '11px' } });
+    for (const v of [16, 17, 21]) {
+      this.versionSelect.appendChild(h('option', { value: String(v), textContent: `v${v}` }));
+    }
+    this.versionSelect.addEventListener('change', () => {
+      const v = parseInt(this.versionSelect.value);
+      if (v !== this.version) this.initWithVersion(v);
+    });
+    this.toolbar.appendChild(this.versionSelect);
+    this.toolbar.appendChild(h('div', { className: 'pbs-toolbar-sep' }));
+    this.toolbar.appendChild(h('div', { className: 'pbs-toolbar-spacer' }));
+    this.searchInput = searchBox('Search entries...', (q) => { this.searchQuery = q; this.pagination.reset(); this.renderTable(); });
+    this.toolbar.appendChild(this.searchInput);
+    this.dirtyIndicator = h('span', { style: { display: 'none' } });
+    this.toolbar.appendChild(this.dirtyIndicator);
+    this.toolbar.appendChild(button('\u{1F4BE} Save', () => this.saveCurrentFile(), 'primary'));
+    this.toolbar.appendChild(button('+ New', () => this.addEntry()));
+    this.toolbar.appendChild(button('\u{1F5D1} Delete', () => this.deleteEntry(), 'danger'));
+    this.root.appendChild(this.toolbar);
+  }
+
+  buildMainLayout() {
+    this.mainLayout = h('div', { className: 'pbs-main' });
+
+    // Left: file sidebar
+    this.sidebar = h('div', { className: 'pbs-sidebar' });
+    this.mainLayout.appendChild(this.sidebar);
+
+    // Center: table + pagination
+    this.centerCol = h('div', { className: 'pbs-center' });
+    this.tableWrap = h('div', { className: 'pbs-table-wrap' });
+    this.centerCol.appendChild(this.tableWrap);
+    this.pagination = createPagination((page) => this.renderTable());
+    this.centerCol.appendChild(this.pagination.el);
+    this.mainLayout.appendChild(this.centerCol);
+
+    // Right: preview + detail
+    this.rightCol = h('div', { className: 'pbs-right' });
+    this.previewPanel = createPreviewPanel((p) => this.loadImageBlob(p));
+    this.rightCol.appendChild(this.previewPanel.el);
+    this.detailPanel = h('div', { className: 'pbs-detail' });
+    this.rightCol.appendChild(this.detailPanel);
+    this.mainLayout.appendChild(this.rightCol);
+
+    this.root.appendChild(this.mainLayout);
+  }
+
+  buildStatusBar() {
+    this.statusBar = h('div', { className: 'pbs-status' });
+    this.statusCount = h('span', { textContent: '' });
+    this.statusBar.appendChild(this.statusCount);
+    this.statusBar.appendChild(h('div', { className: 'pbs-status-spacer' }));
+    this.statusFile = h('span', { textContent: '' });
+    this.statusBar.appendChild(this.statusFile);
+    this.root.appendChild(this.statusBar);
+  }
+
+  // ---- Keyboard ----
+  onKeyDown(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      e.preventDefault();
+      this.saveCurrentFile();
+      return;
+    }
+    const ft = this.currentFileType;
+    if (!ft) return;
+    const entries = this.entries[ft];
+    if (!entries?.length) return;
+
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const dir = e.key === 'ArrowDown' ? 1 : -1;
+      const newIdx = Math.max(0, Math.min(entries.length - 1, this.selectedIdx + dir));
+      if (newIdx !== this.selectedIdx) {
+        this.selectedIdx = newIdx;
+        this.renderTable();
+        this.renderDetail();
+        this.updatePreview();
+      }
+    }
+  }
+
+  // ---- Version selection ----
+  async loadSavedVersion() {
+    let v = null;
+    try {
+      const saved = await this.ctx.storage.get('pbs_version');
+      if (saved) v = parseInt(saved);
+    } catch { /* storage unavailable */ }
+
+    if (!v || ![16, 17, 21].includes(v)) v = 21;
+    this.versionSelect.value = String(v);
+    try {
+      await this.initWithVersion(v);
+    } catch (e) {
+      console.error('PBS Editor init failed:', e);
+      this.showError('Init failed: ' + (e?.message || e));
+    }
+  }
+
+  async initWithVersion(v) {
+    this.version = v;
+    this.versionSelect.value = String(v);
+    this.entries = {};
+    this.originalEntries = {};
+    this.selectedIdx = -1;
+    this.currentFileType = null;
+    this.dirty.clear();
+    this.gameRoot = '';
+    try { this.gameRoot = this.ctx.editor?.gameRoot?.() || ''; } catch {}
+
+    try { await this.ctx.storage.set('pbs_version', String(v)); } catch {}
+
+    this.buildSidebar();
+    this.pagination.reset();
+    this.renderDetail();
+    this.previewPanel.clear();
+    this.updateDirtyIndicator();
+    this.updateStatusBar();
+
+    const types = getAvailableFileTypes(this.version);
+    if (types.length) await this.selectFileType(types[0]);
+  }
+
+  // ---- Sidebar ----
+  buildSidebar() {
+    this.sidebar.innerHTML = '';
+    const types = getAvailableFileTypes(this.version);
+    for (const ft of types) {
+      const config = getFileTypeConfig(ft);
+      if (!config) continue;
+      const item = h('div', {
+        className: `pbs-sidebar-item ${ft === this.currentFileType ? 'active' : ''}`,
+        onClick: () => { if (!this._navigating) this.pushHistory(); this.selectFileType(ft); },
+      });
+      const label = h('span', { className: 'pbs-sidebar-label', textContent: `${config.icon} ${config.label}` });
+      item.appendChild(label);
+      const countBadge = badge('...');
+      item.appendChild(countBadge);
+      this.sidebar.appendChild(item);
+      this.loadFileCount(ft, countBadge);
+    }
+  }
+
+  async loadFileCount(ft, badgeEl) {
+    const fname = getFilename(ft, this.version);
+    if (!fname) { badgeEl.textContent = '0'; return; }
+    try {
+      const content = await this.readFile('PBS/' + fname);
+      if (!this.entries[ft]) {
+        this.entries[ft] = parsePbsFile(content, ft, this.version);
+        this.originalEntries[ft] = JSON.parse(JSON.stringify(this.entries[ft]));
+      }
+      badgeEl.textContent = String(this.entries[ft].length);
+    } catch {
+      badgeEl.textContent = '—';
+      if (!this.entries[ft]) this.entries[ft] = [];
+    }
+  }
+
+  // ---- File selection ----
+  async selectFileType(ft) {
+    if (this.currentFileType && this.dirty.has(this.currentFileType)) {
+      const confirmed = await this.ctx.ui.showConfirmDialog({
+        title: 'Unsaved Changes',
+        message: `You have unsaved changes in ${this.currentFileType}. Discard?`,
+        danger: true,
+      });
+      if (!confirmed) return;
+      const orig = this.originalEntries[this.currentFileType];
+      if (orig) this.entries[this.currentFileType] = JSON.parse(JSON.stringify(orig));
+      this.dirty.delete(this.currentFileType);
+    }
+
+    this.currentFileType = ft;
+    this.searchQuery = '';
+    this.searchInput.value = '';
+
+    const items = this.sidebar.querySelectorAll('.pbs-sidebar-item');
+    const types = getAvailableFileTypes(this.version);
+    items.forEach((el, i) => el.classList.toggle('active', types[i] === ft));
+
+    if (!this.entries[ft]) {
+      const fname = getFilename(ft, this.version);
+      if (fname) {
+        this.showLoading('Loading...');
+        try {
+          const content = await this.readFile('PBS/' + fname);
+          this.entries[ft] = parsePbsFile(content, ft, this.version);
+          this.originalEntries[ft] = JSON.parse(JSON.stringify(this.entries[ft]));
+        } catch {
+          this.entries[ft] = [];
+          this.originalEntries[ft] = [];
+        }
+      } else {
+        this.entries[ft] = [];
+        this.originalEntries[ft] = [];
+      }
+    }
+
+    // Select first entry in default sort order (column 0 ascending)
+    this._tableSortCol = 0;
+    this._tableSortDir = 1;
+    if (this.entries[ft]?.length > 0) {
+      const config = getFileTypeConfig(ft);
+      const sorted = this._sortEntries(this.entries[ft], config, 0, 1);
+      this.selectedIdx = this.entries[ft].indexOf(sorted[0]);
+    } else {
+      this.selectedIdx = -1;
+    }
+
+    this.pagination.reset();
+    this.renderTable();
+    this.renderDetail();
+    this.updatePreview();
+    this.updateDirtyIndicator();
+    this.updateStatusBar();
+    this.updateNavButtons();
+  }
+
+  // ---- Navigation history ----
+  pushHistory() {
+    if (!this.currentFileType || this.selectedIdx < 0 || this._navigating) return;
+    const state = { fileType: this.currentFileType, selectedIdx: this.selectedIdx };
+    // Don't push if same as current
+    if (this._historyIdx >= 0 && this._history[this._historyIdx]?.fileType === state.fileType && this._history[this._historyIdx]?.selectedIdx === state.selectedIdx) return;
+    // Delete forward history when branching
+    this._history = this._history.slice(0, this._historyIdx + 1);
+    this._history.push(state);
+    this._historyIdx = this._history.length - 1;
+    this.updateNavButtons();
+  }
+
+  updateNavButtons() {
+    if (this.backBtn) this.backBtn.disabled = this._historyIdx <= 0;
+    if (this.forwardBtn) this.forwardBtn.disabled = this._historyIdx >= this._history.length - 1;
+  }
+
+  async goBack() {
+    if (this._historyIdx <= 0) return;
+    this._historyIdx--;
+    await this.restoreHistory(this._history[this._historyIdx]);
+  }
+
+  async goForward() {
+    if (this._historyIdx >= this._history.length - 1) return;
+    this._historyIdx++;
+    await this.restoreHistory(this._history[this._historyIdx]);
+  }
+
+  async restoreHistory(state) {
+    this._navigating = true;
+    try {
+      await this.selectFileType(state.fileType);
+      this.selectedIdx = state.selectedIdx;
+      // Jump to correct page in sorted order
+      const ft = state.fileType;
+      const config = getFileTypeConfig(ft);
+      const sorted = this._sortEntries(this.entries[ft], config, this._tableSortCol ?? 0, this._tableSortDir ?? 1);
+      const sortedIdx = sorted.indexOf(this.entries[ft][this.selectedIdx]);
+      const page = Math.floor(sortedIdx / PAGE_SIZE);
+      this.pagination._forcePage?.(page);
+      this.renderTable();
+      this.renderDetail();
+      this.updatePreview();
+    } finally {
+      this._navigating = false;
+    }
+  }
+
+  async navigateTo(refType, name) {
+    if (!name) return;
+    this.pushHistory();
+    this._navigating = true;
+    try {
+      await this.selectFileType(refType);
+      const entries = this.entries[refType];
+      if (entries) {
+        const idx = entries.findIndex(e =>
+          (e.InternalName || e.Name || '').toUpperCase() === name.toUpperCase()
+        );
+        if (idx >= 0) {
+          this.selectedIdx = idx;
+          // Find position in sorted order for correct page
+          const config = getFileTypeConfig(refType);
+          const sorted = this._sortEntries(entries, config, this._tableSortCol ?? 0, this._tableSortDir ?? 1);
+          const sortedIdx = sorted.indexOf(entries[idx]);
+          const page = Math.floor(sortedIdx / PAGE_SIZE);
+          this.pagination._forcePage?.(page);
+          this.renderTable();
+          this.renderDetail();
+          this.updatePreview();
+          this.pushHistory();
+        }
+      }
+    } finally {
+      this._navigating = false;
+    }
+  }
+
+  // ---- Table ----
+  getPageEntries() {
+    const ft = this.currentFileType;
+    const entries = this.entries[ft];
+    if (!entries) return [];
+    let rows = entries;
+    if (this.searchQuery) {
+      const q = this.searchQuery.toLowerCase();
+      const config = getFileTypeConfig(ft);
+      rows = entries.filter(r =>
+        config.columns.some(c => String(r[c.key] ?? '').toLowerCase().includes(q))
+      );
+    }
+    return rows;
+  }
+
+  _sortEntries(entries, config, sortCol, sortDir) {
+    const col = config.columns[sortCol];
+    if (!col) return entries;
+    const sorted = entries.map((r, i) => ({ row: r, idx: i }));
+    sorted.sort((a, b) => {
+      let va = a.row[col.key] ?? '', vb = b.row[col.key] ?? '';
+      if (col.numeric) { va = parseFloat(va) || 0; vb = parseFloat(vb) || 0; }
+      return va < vb ? -sortDir : va > vb ? sortDir : 0;
+    });
+    return sorted.map(s => s.row);
+  }
+
+  renderTable() {
+    this.tableWrap.innerHTML = '';
+    const ft = this.currentFileType;
+    const config = getFileTypeConfig(ft);
+    if (!config || !this.entries[ft]?.length) {
+      this.tableWrap.appendChild(h('div', { className: 'pbs-empty', textContent: this.entries[ft]?.length === 0 ? 'No entries in this file.' : 'Select a file type.' }));
+      this.pagination.setTotal(0);
+      return;
+    }
+
+    // Sort ALL entries first, then paginate
+    const sortCol = this._tableSortCol ?? 0;
+    const sortDir = this._tableSortDir ?? 1;
+    const allFiltered = this._sortEntries(this.getPageEntries(), config, sortCol, sortDir);
+
+    const page = this.pagination.getPage();
+    const totalPages = Math.max(1, Math.ceil(allFiltered.length / PAGE_SIZE));
+    this.pagination.setTotal(totalPages);
+
+    const start = page * PAGE_SIZE;
+    const pageRows = allFiltered.slice(start, start + PAGE_SIZE);
+
+    if (!pageRows.length) {
+      this.tableWrap.appendChild(h('div', { className: 'pbs-empty', textContent: 'No entries match search.' }));
+      return;
+    }
+
+    this.table = createTable(config.columns, pageRows, {
+      sortCol, sortDir,
+      selectedIdx: (() => {
+        const idx = allFiltered.indexOf(this.entries[ft][this.selectedIdx]);
+        return idx >= start && idx < start + PAGE_SIZE ? idx - start : -1;
+      })(),
+      onSelect: (pageIdx, row) => {
+        const realIdx = this.entries[ft].indexOf(row);
+        this.pushHistory();
+        this.selectedIdx = realIdx;
+        this.table.setSelected(pageIdx);
+        this.renderDetail();
+        this.updatePreview();
+      },
+      onContextMenu: (x, y, pageIdx, row) => {
+        const realIdx = this.entries[ft].indexOf(row);
+        showContextMenu(x, y, [
+          { label: 'Duplicate', action: () => this.duplicateEntry(realIdx) },
+          { label: 'Toggle Exclude', action: () => this.toggleExclude(realIdx) },
+          { separator: true },
+          { label: 'Delete', danger: true, action: () => this.deleteEntryAt(realIdx) },
+        ], this.host);
+      },
+      onSort: () => {
+        this._tableSortCol = this.table.getSortCol();
+        this._tableSortDir = this.table.getSortDir();
+        this.renderTable();
+        this.renderDetail();
+        this.updatePreview();
+      },
+    });
+    this.tableWrap.appendChild(this.table.el);
+    this.updateStatusBar();
+  }
+
+  // ---- Preview ----
+  async updatePreview() {
+    const ft = this.currentFileType;
+    const config = getFileTypeConfig(ft);
+    if (!config || this.selectedIdx < 0 || !this.entries[ft]) {
+      this.previewPanel.clear();
+      return;
+    }
+    const entry = this.entries[ft][this.selectedIdx];
+    if (!entry) { this.previewPanel.clear(); return; }
+
+    const path = getPrimaryGraphic(ft, entry, this.version);
+    const displayVal = entry[config.displayField] || entry[config.headerField] || '';
+    const fps = await this.getSpriteFps(entry, ft);
+    this.previewPanel.show(this.gameRoot, path, displayVal, fps);
+  }
+
+  // ---- Detail ----
+  makeFieldEditor(fieldDef, val, entry, config) {
+    const onNavigate = (refType, name) => this.navigateTo(refType, name);
+    return createFieldEditor(fieldDef, val, (newVal) => {
+      entry[fieldDef.key] = newVal;
+      this.markDirty();
+      if (config.columns.some(c => c.key === fieldDef.key)) {
+        this.renderTable();
+      }
+    }, this.entries, this.ctx, onNavigate);
+  }
+
+  renderDetail() {
+    this.detailPanel.innerHTML = '';
+    const ft = this.currentFileType;
+    const config = getFileTypeConfig(ft);
+    if (!config || this.selectedIdx < 0 || !this.entries[ft]) return;
+
+    const entry = this.entries[ft][this.selectedIdx];
+    if (!entry) return;
+
+    const header = h('div', { className: 'pbs-detail-header' });
+    const displayVal = entry[config.displayField] || entry[config.headerField] || `Entry ${this.selectedIdx + 1}`;
+    header.appendChild(h('span', { textContent: displayVal }));
+    if (entry._excluded) {
+      header.appendChild(h('span', { textContent: '[Excluded]', style: { color: 'var(--warning)', fontSize: '10px' } }));
+    }
+    this.detailPanel.appendChild(header);
+
+    if (config.hasSubSections) {
+      this.renderSubSectionDetail(ft, config, entry);
+      return;
+    }
+
+    const body = h('div', { className: 'pbs-detail-body' });
+
+    if (config.sections?.length) {
+      for (const section of config.sections) {
+        const toggle = createSectionToggle(section.label);
+        body.appendChild(toggle.toggle);
+        for (const fieldDef of section.fields) {
+          const val = entry[fieldDef.key] || '';
+          const editor = this.makeFieldEditor(fieldDef, val, entry, config);
+          toggle.body.appendChild(editor.el);
+        }
+        body.appendChild(toggle.body);
+      }
+    } else {
+      for (const fieldDef of (config.fields || [])) {
+        const val = entry[fieldDef.key] || '';
+        const editor = this.makeFieldEditor(fieldDef, val, entry, config);
+        body.appendChild(editor.el);
+      }
+    }
+
+    this.detailPanel.appendChild(body);
+  }
+
+  renderSubSectionDetail(ft, config, entry) {
+    const body = h('div', { className: 'pbs-detail-body', style: { display: 'block', padding: '8px 10px' } });
+
+    for (const section of (config.sections || [])) {
+      for (const fieldDef of section.fields) {
+        const val = entry[fieldDef.key] || '';
+        const editor = this.makeFieldEditor(fieldDef, val, entry, config);
+        body.appendChild(editor.el);
+      }
+    }
+
+    if (ft === 'encounters') {
+      body.appendChild(createEncounterEditor(entry, () => this.markDirty(), () => this.renderDetail(), this.entries, (refType, name) => this.navigateTo(refType, name)));
+    } else if (ft === 'trainers') {
+      body.appendChild(createTrainerPokemonEditor(entry, () => this.markDirty(), () => this.renderDetail(), this.entries, this.ctx, (refType, name) => this.navigateTo(refType, name)));
+    }
+
+    this.detailPanel.appendChild(body);
+  }
+
+  // ---- Save ----
+  async saveCurrentFile() {
+    const ft = this.currentFileType;
+    if (!ft) return;
+    const entries = this.entries[ft];
+    if (!entries) return;
+
+    const fname = getFilename(ft, this.version);
+    if (!fname) return;
+
+    try {
+      const content = writePbsFile(entries, ft, this.version);
+      await this.ctx.fs.writeProjectFile('PBS/' + fname, content);
+      this.dirty.delete(ft);
+      this.originalEntries[ft] = JSON.parse(JSON.stringify(entries));
+      this.updateDirtyIndicator();
+      this.ctx.ui.showToast({ message: `Saved ${fname}`, level: 'info' });
+    } catch (e) {
+      this.ctx.ui.showToast({ message: `Save failed: ${e.message}`, level: 'error' });
+    }
+  }
+
+  markDirty() {
+    this.dirty.add(this.currentFileType);
+    this.updateDirtyIndicator();
+  }
+
+  updateDirtyIndicator() {
+    if (this.dirty.size > 0) {
+      this.dirtyIndicator.style.display = 'inline-flex';
+      this.dirtyIndicator.innerHTML = '';
+      this.dirtyIndicator.appendChild(h('span', { className: 'pbs-dirty-dot' }));
+    } else {
+      this.dirtyIndicator.style.display = 'none';
+    }
+  }
+
+  updateStatusBar() {
+    const ft = this.currentFileType;
+    const entries = this.entries[ft];
+    const count = entries?.length || 0;
+    const filtered = this.getPageEntries().length;
+    this.statusCount.textContent = filtered === count ? `${count} entries` : `${filtered} / ${count}`;
+    const fname = getFilename(ft, this.version);
+    this.statusFile.textContent = fname ? `PBS/${fname}` : '';
+  }
+
+  // ---- CRUD ----
+  async addEntry() {
+    const ft = this.currentFileType;
+    if (!ft) return;
+    const config = getFileTypeConfig(ft);
+
+    const name = await this.ctx.ui.showInputDialog({
+      title: 'New Entry',
+      message: `Enter name for new ${config.label} entry:`,
+      placeholder: 'INTERNAL_NAME',
+    });
+    if (!name) return;
+
+    const entries = this.entries[ft];
+    const newEntry = { _id: entries.length + 1, _header: name, _excluded: false, Name: name, InternalName: name };
+
+    const allFields = (config.sections || []).flatMap(s => s.fields).concat(config.fields || []);
+    for (const f of allFields) {
+      if (!newEntry[f.key]) newEntry[f.key] = '';
+    }
+    if (ft === 'encounters') newEntry._encounters = [];
+    if (ft === 'trainers') newEntry._pokemon = [];
+
+    entries.push(newEntry);
+    this.selectedIdx = entries.length - 1;
+
+    // Jump to last page
+    const allFiltered = this.getPageEntries();
+    const lastPage = Math.max(0, Math.ceil(allFiltered.length / PAGE_SIZE) - 1);
+    this.pagination.setTotal(Math.max(1, Math.ceil(allFiltered.length / PAGE_SIZE)));
+    // Force page to last
+    this.pagination._forcePage?.(lastPage);
+
+    this.renderTable();
+    this.renderDetail();
+    this.updatePreview();
+    this.markDirty();
+    this.updateSidebarBadge(ft, entries.length);
+  }
+
+  async deleteEntry() {
+    if (this.selectedIdx < 0) return;
+    await this.deleteEntryAt(this.selectedIdx);
+  }
+
+  async deleteEntryAt(idx) {
+    const ft = this.currentFileType;
+    const entries = this.entries[ft];
+    const entry = entries[idx];
+    if (!entry) return;
+
+    const config = getFileTypeConfig(ft);
+    const displayVal = entry[config.displayField] || entry[config.headerField] || `#${idx + 1}`;
+
+    const confirmed = await this.ctx.ui.showConfirmDialog({
+      title: 'Delete Entry',
+      message: `Delete "${displayVal}"? This cannot be undone.`,
+      danger: true,
+    });
+    if (!confirmed) return;
+
+    entries.splice(idx, 1);
+    this.selectedIdx = Math.min(idx, entries.length - 1);
+    this.renderTable();
+    this.renderDetail();
+    this.updatePreview();
+    this.markDirty();
+    this.updateSidebarBadge(ft, entries.length);
+  }
+
+  async duplicateEntry(idx) {
+    const ft = this.currentFileType;
+    const entries = this.entries[ft];
+    const entry = entries[idx];
+    if (!entry) return;
+
+    const copy = JSON.parse(JSON.stringify(entry));
+    copy._id = entries.length + 1;
+    copy._header = copy._header + '_COPY';
+    if (copy.Name) copy.Name = copy.Name + ' Copy';
+    if (copy.InternalName) copy.InternalName = copy.InternalName + '_COPY';
+    entries.push(copy);
+    this.selectedIdx = entries.length - 1;
+    this.renderTable();
+    this.renderDetail();
+    this.updatePreview();
+    this.markDirty();
+    this.updateSidebarBadge(ft, entries.length);
+  }
+
+  toggleExclude(idx) {
+    const ft = this.currentFileType;
+    const entry = this.entries[ft][idx];
+    if (!entry) return;
+    entry._excluded = !entry._excluded;
+    this.renderTable();
+    this.renderDetail();
+    this.markDirty();
+  }
+
+  updateSidebarBadge(ft, count) {
+    const types = getAvailableFileTypes(this.version);
+    const items = this.sidebar.querySelectorAll('.pbs-sidebar-item');
+    const idx = types.indexOf(ft);
+    if (idx >= 0 && items[idx]) {
+      const b = items[idx].querySelector('.pbs-sidebar-badge');
+      if (b) b.textContent = String(count);
+    }
+  }
+
+  showLoading(msg) {
+    this.tableWrap.innerHTML = '';
+    this.tableWrap.appendChild(h('div', { className: 'pbs-loading', textContent: msg || 'Loading...' }));
+  }
+
+  showError(msg) {
+    this.tableWrap.innerHTML = '';
+    this.tableWrap.appendChild(h('div', { className: 'pbs-empty', textContent: msg }));
+  }
+
+  async readFile(path) {
+    return await this.ctx.fs.readProjectFile(path);
+  }
+}

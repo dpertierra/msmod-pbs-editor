@@ -314,6 +314,17 @@ export const CSS = `
 .pbs-field textarea:focus { border-color: var(--accent); }
 .pbs-field textarea { min-height: 36px; resize: vertical; }
 .pbs-field input[type="number"] { width: 70px; }
+.pbs-field select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: var(--input-bg);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888888'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 8px auto;
+  padding-right: 22px;
+  color: var(--text-primary);
+}
 
 /* ---- Collapsible section ---- */
 .pbs-section-toggle {
@@ -415,6 +426,21 @@ export const CSS = `
   color: var(--text-secondary);
   text-align: center;
   font-variant-numeric: tabular-nums;
+}
+
+/* ---- BST row ---- */
+.pbs-stat-bst-row {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+.pbs-stat-bst-row .pbs-stat-label {
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+.pbs-stat-bst-row .pbs-stat-value {
+  font-weight: 700;
+  color: var(--text-secondary);
 }
 
 /* ---- Type badge ---- */

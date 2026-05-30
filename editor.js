@@ -12,6 +12,7 @@ import {
   createTable, createFieldEditor,
   createEncounterEditor, createTrainerPokemonEditor,
   createPagination, createPreviewPanel, createSectionToggle,
+  configureTypeIcons, clearTypeIcons,
 } from './components.js';
 
 const PAGE_SIZE = 50;
@@ -49,8 +50,26 @@ export class PbsEditor {
     } catch { return null; }
   }
 
-  async loadMetrics() {
-    if (this._metricsCache) return this._metricsCache;
+  async loadTypeIcons() {
+    if (!this.gameRoot) return;
+    const base = this.gameRoot.replace(/\\/g, '/');
+    const absPath = this.version >= 21
+      ? `${base}/Graphics/UI/Battle/icon_types.png`
+      : `${base}/Graphics/Pictures/types.png`;
+    try {
+      const url = await this.loadImageBlob(absPath);
+      if (!url) return;
+      const img = new Image();
+      img.onload = () => {
+        const typeCount = this.entries.types?.length || 19;
+        const iconH = Math.round(img.naturalHeight / typeCount);
+        configureTypeIcons(url, img.naturalWidth, iconH, img.naturalHeight);
+      };
+      img.src = url;
+    } catch { /* sprite not found — colored fallback used */ }
+  }
+
+  async loadMetrics() {    if (this._metricsCache) return this._metricsCache;
     this._metricsCache = {};
     try {
       const fname = this.version >= 21 ? 'pokemon_metrics.txt' : '';
@@ -235,6 +254,9 @@ export class PbsEditor {
     try { this.gameRoot = this.ctx.editor?.gameRoot?.() || ''; } catch {}
 
     try { await this.ctx.storage.set('pbs_version', String(v)); } catch {}
+
+    clearTypeIcons();
+    this.loadTypeIcons();
 
     this.buildSidebar();
     this.pagination.reset();
@@ -523,6 +545,14 @@ export class PbsEditor {
     }
     const entry = this.entries[ft][this.selectedIdx];
     if (!entry) { this.previewPanel.clear(); return; }
+
+    if (ft === 'types') {
+      const displayVal = entry[config.displayField] || entry[config.headerField] || '';
+      const rawPos = this.version >= 21 ? entry.IconPosition : entry._id;
+      const iconPos = parseInt(rawPos);
+      this.previewPanel.showTypeIcon(displayVal, !isNaN(iconPos) ? iconPos : null);
+      return;
+    }
 
     const path = getPrimaryGraphic(ft, entry, this.version);
     const displayVal = entry[config.displayField] || entry[config.headerField] || '';

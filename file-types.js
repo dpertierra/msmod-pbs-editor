@@ -31,29 +31,34 @@ export function getGraphicPaths(fileType, entry, version) {
   const name = entry.InternalName || '';
 
   if (fileType === 'pokemon' || fileType === 'pokemon_forms') {
+    const formIndex = fileType === 'pokemon_forms' ? (parseInt(entry.FormIndex) || 0) : 0;
+    const formSuffix = formIndex > 0 ? `_${formIndex}` : '';
+    const formName = `${name}${formSuffix}`;
+    const formId = formIndex > 0 ? `${id}_${formIndex}` : id;
     if (version >= 21) {
-      paths.push({ path: `Graphics/Pokemon/Front/${name}.png`, label: 'Front' });
-      paths.push({ path: `Graphics/Pokemon/Back/${name}.png`, label: 'Back' });
-      paths.push({ path: `Graphics/Pokemon/Front shiny/${name}.png`, label: 'Shiny' });
-      paths.push({ path: `Graphics/Pokemon/Front/${name}_female.png`, label: 'Female' });
-      paths.push({ path: `Graphics/Pokemon/Icons/${name}.png`, label: 'Icon' });
-      paths.push({ path: `Graphics/Pokemon/Icons shiny/${name}.png`, label: 'Icon Shiny' });
+      paths.push({ path: `Graphics/Pokemon/Front/${formName}.png`, label: 'Front' });
+      paths.push({ path: `Graphics/Pokemon/Back/${formName}.png`, label: 'Back' });
+      paths.push({ path: `Graphics/Pokemon/Front shiny/${formName}.png`, label: 'Shiny' });
+      paths.push({ path: `Graphics/Pokemon/Front/${formName}_female.png`, label: 'Female' });
+      paths.push({ path: `Graphics/Pokemon/Icons/${formName}.png`, label: 'Icon' });
+      paths.push({ path: `Graphics/Pokemon/Icons shiny/${formName}.png`, label: 'Icon Shiny' });
     } else if (version >= 17) {
-      paths.push({ path: `Graphics/Battlers/Front/${id}.png`, label: 'Front' });
-      paths.push({ path: `Graphics/Battlers/Back/${id}.png`, label: 'Back' });
-      paths.push({ path: `Graphics/Battlers/FrontShiny/${id}.png`, label: 'Shiny' });
-      paths.push({ path: `Graphics/Battlers/Front/Female/${id}.png`, label: 'Female' });
-      paths.push({ path: `Graphics/Icons/icon${id}.png`, label: 'Icon' });
+      paths.push({ path: `Graphics/Battlers/Front/${formId}.png`, label: 'Front' });
+      paths.push({ path: `Graphics/Battlers/Back/${formId}.png`, label: 'Back' });
+      paths.push({ path: `Graphics/Battlers/FrontShiny/${formId}.png`, label: 'Shiny' });
+      paths.push({ path: `Graphics/Battlers/Front/Female/${formId}.png`, label: 'Female' });
+      paths.push({ path: `Graphics/Icons/icon${formId}.png`, label: 'Icon' });
     } else {
-      paths.push({ path: `Graphics/Battlers/${id}.png`, label: 'Front' });
-      paths.push({ path: `Graphics/Battlers/${id}b.png`, label: 'Back' });
-      paths.push({ path: `Graphics/Battlers/${id}s.png`, label: 'Shiny' });
-      paths.push({ path: `Graphics/Battlers/${id}f.png`, label: 'Female' });
-      paths.push({ path: `Graphics/Icons/icon${id}.png`, label: 'Icon' });
+      paths.push({ path: `Graphics/Battlers/${formId}.png`, label: 'Front' });
+      paths.push({ path: `Graphics/Battlers/${formId}b.png`, label: 'Back' });
+      paths.push({ path: `Graphics/Battlers/${formId}s.png`, label: 'Shiny' });
+      paths.push({ path: `Graphics/Battlers/${formId}f.png`, label: 'Female' });
+      paths.push({ path: `Graphics/Icons/icon${formId}.png`, label: 'Icon' });
     }
   } else if (fileType === 'trainers' || fileType === 'trainer_types') {
+    const trainerName = fileType === 'trainers' ? (entry.TrainerType || name) : name;
     if (version >= 21) {
-      paths.push({ path: `Graphics/Trainers/${name}.png`, label: 'Sprite' });
+      paths.push({ path: `Graphics/Trainers/${trainerName}.png`, label: 'Sprite' });
     } else {
       paths.push({ path: `Graphics/Characters/trainer${id}.png`, label: 'Sprite' });
     }

@@ -2,6 +2,89 @@
  * UI building blocks for PBS Editor v2.
  */
 
+import { TYPE_COLORS } from './file-types.js';
+
+// ---- Type icon sprite (loaded from game project) ----
+let _typeIconUrl = null;
+let _typeIconW = 0;
+let _typeIconH = 0;
+let _typeIconTotalH = 0;
+
+const TYPE_ICON_DISP_H = 20; // display height in list rows
+
+export function configureTypeIcons(url, iconW, iconH, totalH) {
+  _typeIconUrl = url;
+  _typeIconW = iconW;
+  _typeIconH = iconH;
+  _typeIconTotalH = totalH;
+}
+
+export function clearTypeIcons() {
+  _typeIconUrl = null;
+  _typeIconW = 0;
+  _typeIconH = 0;
+  _typeIconTotalH = 0;
+}
+
+export function getTypeIconConfig() {
+  return _typeIconUrl ? { url: _typeIconUrl, iconW: _typeIconW, iconH: _typeIconH, totalH: _typeIconTotalH } : null;
+}
+
+function typeIconStyle(iconPos, dispH) {
+  const dH = dispH || TYPE_ICON_DISP_H;
+  const scale = _typeIconH > 0 ? dH / _typeIconH : 1;
+  const dispW = Math.round(_typeIconW * scale);
+  const dispTotalH = Math.round(_typeIconTotalH * scale);
+  return {
+    display: 'inline-block',
+    width: dispW + 'px',
+    height: dH + 'px',
+    backgroundImage: `url(${_typeIconUrl})`,
+    backgroundPosition: `0 -${iconPos * dH}px`,
+    backgroundRepeat: 'no-repeat',
+    backgroundSize: `${dispW}px ${dispTotalH}px`,
+    imageRendering: 'pixelated',
+    flexShrink: '0',
+    alignSelf: 'center',
+  };
+}
+
+function makeTypeIndicator(typeName, iconPos) {
+  if (_typeIconUrl && iconPos != null) {
+    return h('span', { style: typeIconStyle(iconPos) });
+  }
+  const color = TYPE_COLORS[(typeName || '').toUpperCase()] || null;
+  return h('span', { style: {
+    display: 'inline-block',
+    width: '10px',
+    height: '10px',
+    borderRadius: '2px',
+    background: color || 'var(--border)',
+    flexShrink: '0',
+    alignSelf: 'center',
+    border: '1px solid ' + (color ? color + '66' : 'var(--border)'),
+  }});
+}
+
+function updateTypeIndicator(el, typeName, iconPos) {
+  if (_typeIconUrl && iconPos != null) {
+    Object.assign(el.style, typeIconStyle(iconPos));
+    el.style.background = '';
+    el.style.border = '';
+    el.style.borderRadius = '';
+  } else {
+    const color = TYPE_COLORS[(typeName || '').toUpperCase()] || null;
+    el.style.backgroundImage = '';
+    el.style.backgroundPosition = '';
+    el.style.backgroundSize = '';
+    el.style.width = '10px';
+    el.style.height = '10px';
+    el.style.borderRadius = '2px';
+    el.style.background = color || 'var(--border)';
+    el.style.border = '1px solid ' + (color ? color + '66' : 'var(--border)');
+  }
+}
+
 // ---- Element helper ----
 export function h(tag, attrs, ...children) {
   const el = document.createElement(tag);
@@ -182,7 +265,44 @@ export function createPreviewPanel(loadImageFn) {
     panel.appendChild(ph);
   }
 
-  return { el: panel, show, clear };
+  function showTypeIcon(displayName, iconPos) {
+    stopAnim();
+    panel.innerHTML = '';
+    const cfg = getTypeIconConfig();
+    if (!cfg || iconPos == null) {
+      const color = TYPE_COLORS[(displayName || '').toUpperCase()] || null;
+      const ph = h('div', { className: 'pbs-preview-placeholder' });
+      ph.appendChild(h('div', {
+        style: {
+          width: '80px', height: '28px', borderRadius: '4px',
+          background: color ? color + '33' : 'var(--bg-tertiary)',
+          border: '2px solid ' + (color || 'var(--border)'),
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: color || 'var(--text-tertiary)', fontWeight: '700', fontSize: '12px',
+        },
+        textContent: displayName || '?',
+      }));
+      panel.appendChild(ph);
+      panel.appendChild(h('div', { className: 'pbs-preview-name', textContent: displayName || '' }));
+      return;
+    }
+    const SCALE = Math.max(2, Math.floor(128 / cfg.iconW));
+    const dispW = cfg.iconW * SCALE;
+    const dispH = cfg.iconH * SCALE;
+    const canvas = h('canvas', { width: dispW, height: dispH, style: { imageRendering: 'pixelated', borderRadius: '4px' } });
+    const ctx2d = canvas.getContext('2d');
+    ctx2d.imageSmoothingEnabled = false;
+    const img = new Image();
+    img.onload = () => {
+      ctx2d.clearRect(0, 0, dispW, dispH);
+      ctx2d.drawImage(img, 0, iconPos * cfg.iconH, cfg.iconW, cfg.iconH, 0, 0, dispW, dispH);
+    };
+    img.src = cfg.url;
+    panel.appendChild(canvas);
+    panel.appendChild(h('div', { className: 'pbs-preview-name', textContent: displayName || '' }));
+  }
+
+  return { el: panel, show, clear, showTypeIcon };
 }
 
 // ---- Sortable table ----
@@ -324,7 +444,16 @@ export function createFieldEditor(fieldDef, value, onChange, refData, ctx, onNav
   }
   if (type === 'list') {
     const items = (value || '').split(',').filter(Boolean);
-    const editor = createListEditor(items, onChange, fieldDef.ref ? getSuggestions() : null, onNavigate, fieldDef.ref);
+    let typeIconPositions = null;
+    if (fieldDef.ref === 'types' && refData?.types) {
+      typeIconPositions = {};
+      for (const t of refData.types) {
+        const name = (t.InternalName || t.Name || '').toUpperCase();
+        const pos = parseInt(t.IconPosition ?? t._id);
+        if (name && !isNaN(pos)) typeIconPositions[name] = pos;
+      }
+    }
+    const editor = createListEditor(items, onChange, fieldDef.ref ? getSuggestions() : null, onNavigate, fieldDef.ref, typeIconPositions);
     wrap.appendChild(editor.el);
     return { el: wrap, getValue: () => editor.getValue() };
   }
@@ -368,14 +497,34 @@ export function createFieldEditor(fieldDef, value, onChange, refData, ctx, onNav
 }
 
 // ---- List editor ----
-function createListEditor(items, onChange, suggestions, onNavigate, refKey) {
+function createListEditor(items, onChange, suggestions, onNavigate, refKey, typeIconPositions) {
   const container = h('div', { className: 'pbs-list-editor' });
+  const isTypeField = refKey === 'types';
+
+  function getIconPos(typeName) {
+    if (!isTypeField || !typeIconPositions) return null;
+    const pos = typeIconPositions[(typeName || '').toUpperCase()];
+    return pos !== undefined ? pos : null;
+  }
+
   function render() {
     container.innerHTML = '';
     for (let i = 0; i < items.length; i++) {
       const row = h('div', { className: 'pbs-list-row' });
+
+      let indicator = null;
+      if (isTypeField) {
+        indicator = makeTypeIndicator(items[i], getIconPos(items[i]));
+        row.appendChild(indicator);
+      }
+
       if (suggestions) {
-        const ref = createRefInput(items[i], suggestions, (v) => { items[i] = v; emitChange(); });
+        const ii = i;
+        const ref = createRefInput(items[i], suggestions, (v) => {
+          items[ii] = v;
+          if (indicator) updateTypeIndicator(indicator, v, getIconPos(v));
+          emitChange();
+        });
         ref.el.style.flex = '1';
         ref.el.style.minWidth = '0';
         row.appendChild(ref.el);
@@ -479,6 +628,16 @@ function statColor(val) {
 }
 function createStatsEditor(values, names, onChange) {
   const container = h('div', {});
+  let _bstFill = null;
+  let _bstVal = null;
+
+  function calcBst() { return values.reduce((s, v) => s + (v || 0), 0); }
+  function updateBst() {
+    const bst = calcBst();
+    if (_bstFill) _bstFill.style.width = Math.min(100, bst / 7.2) + '%';
+    if (_bstVal) _bstVal.textContent = String(bst);
+  }
+
   function render() {
     container.innerHTML = '';
     for (let i = 0; i < names.length; i++) {
@@ -490,10 +649,22 @@ function createStatsEditor(values, names, onChange) {
       row.appendChild(barBg);
       const inp = h('input', { type: 'number', className: 'pbs-stat-value', value: values[i] || 0, min: 0, max: 255 });
       const ii = i;
-      inp.addEventListener('input', () => { values[ii] = parseInt(inp.value) || 0; fill.style.width = Math.min(100, values[ii] / 2.55) + '%'; fill.style.background = statColor(values[ii]); emitChange(); });
+      inp.addEventListener('input', () => { values[ii] = parseInt(inp.value) || 0; fill.style.width = Math.min(100, values[ii] / 2.55) + '%'; fill.style.background = statColor(values[ii]); updateBst(); emitChange(); });
       row.appendChild(inp);
       container.appendChild(row);
     }
+
+    // BST row
+    const bst = calcBst();
+    const bstRow = h('div', { className: 'pbs-stat-row pbs-stat-bst-row' });
+    bstRow.appendChild(h('span', { className: 'pbs-stat-label', textContent: 'BST' }));
+    const bstBarBg = h('div', { className: 'pbs-stat-bar-bg' });
+    _bstFill = h('div', { className: 'pbs-stat-bar-fill', style: { width: Math.min(100, bst / 7.2) + '%', background: '#7c8aff' } });
+    bstBarBg.appendChild(_bstFill);
+    bstRow.appendChild(bstBarBg);
+    _bstVal = h('span', { className: 'pbs-stat-value', textContent: String(bst) });
+    bstRow.appendChild(_bstVal);
+    container.appendChild(bstRow);
   }
   function emitChange() { onChange(values.join(',')); }
   render();

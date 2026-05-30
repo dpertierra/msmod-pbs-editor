@@ -83,10 +83,15 @@ jobs:
 
       - name: Print registry PR block
         run: |
+          UPDATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           cat <<EOF
           ====================================================================
           Update https://github.com/Toskan4134/maker-studio-mods/blob/main/index.json
-          Change your mod entry to:
+          Top-level field:
+
+            "updatedAt": "$UPDATED_AT",
+
+          Your mod entry:
 
             "version": "${{ steps.meta.outputs.version }}",
             "assetName": "${{ steps.meta.outputs.asset-name }}",
@@ -115,8 +120,9 @@ jobs:
           VERSION="${{ needs.build-and-release.outputs.version }}"
           ASSET="${{ needs.build-and-release.outputs.asset-name }}"
           SHA="${{ needs.build-and-release.outputs.sha256 }}"
-          jq --arg id "$MOD_ID" --arg v "$VERSION" --arg a "$ASSET" --arg s "$SHA" \
-            '(.mods[] | select(.id == $id)) |= (.version = $v | .assetName = $a | .sha256 = $s)' \
+          UPDATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq --arg id "$MOD_ID" --arg v "$VERSION" --arg a "$ASSET" --arg s "$SHA" --arg t "$UPDATED_AT" \
+            '.updatedAt = $t | (.mods[] | select(.id == $id)) |= (.version = $v | .assetName = $a | .sha256 = $s)' \
             index.json > index.json.tmp && mv index.json.tmp index.json
 
       - name: Create PR

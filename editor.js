@@ -660,6 +660,20 @@ export class PbsEditor {
     }
   }
 
+  async saveAllDirty() {
+    for (const ft of [...this.dirty]) {
+      const entries = this.entries[ft];
+      if (!entries) continue;
+      const fname = getFilename(ft, this.version);
+      if (!fname) continue;
+      const content = writePbsFile(entries, ft, this.version);
+      await this.ctx.fs.writeProjectFile('PBS/' + fname, content);
+      this.dirty.delete(ft);
+      this.originalEntries[ft] = JSON.parse(JSON.stringify(entries));
+    }
+    this.updateDirtyIndicator();
+  }
+
   markDirty() {
     this.dirty.add(this.currentFileType);
     this.updateDirtyIndicator();

@@ -100,14 +100,11 @@ jobs:
   registry-pr:
     needs: build-and-release
     runs-on: ubuntu-latest
-    env:
-      REGISTRY_REPO: Toskan4134/maker-studio-mods
-      FORK_OWNER: Toskan4134
     steps:
-      - name: Checkout fork
+      - name: Checkout registry
         uses: actions/checkout@v4
         with:
-          repository: ${{ env.FORK_OWNER }}/maker-studio-mods
+          repository: Toskan4134/maker-studio-mods
           token: ${{ secrets.REGISTRY_PAT }}
           path: registry
 
@@ -127,7 +124,6 @@ jobs:
         with:
           path: registry
           token: ${{ secrets.REGISTRY_PAT }}
-          push-to-fork: ${{ env.FORK_OWNER }}/maker-studio-mods
           branch: bump-${{ needs.build-and-release.outputs.mod-id }}-${{ needs.build-and-release.outputs.version }}
           commit-message: "bump ${{ needs.build-and-release.outputs.mod-id }} to v${{ needs.build-and-release.outputs.version }}"
           title: "bump ${{ needs.build-and-release.outputs.mod-id }} to v${{ needs.build-and-release.outputs.version }}"

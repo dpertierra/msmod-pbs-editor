@@ -13,9 +13,8 @@
 # Required repo secrets / settings: none. The default `GITHUB_TOKEN` is enough to publish
 # releases on your own repo.
 #
-# Optional automation: see the commented `registry-pr` job at the bottom — it will open the
-# registry PR for you if you set a `REGISTRY_PAT` secret (Personal Access Token with `repo`
-# scope on an account that has a fork of `maker-studio-mods`).
+# Required secret: `REGISTRY_PAT` — Personal Access Token with `repo` scope on Toskan4134's
+# account (needed for the `registry-pr` job to push to the fork and open the PR).
 
 name: Publish mod release
 
@@ -98,52 +97,38 @@ jobs:
           ====================================================================
           EOF
 
-  # ----------------------------------------------------------------------------------
-  # OPTIONAL: auto-open the registry PR.
-  # Enable by:
-  #   1. Forking https://github.com/Toskan4134/maker-studio-mods on the GitHub account
-  #      whose token you'll use below.
-  #   2. Creating a PAT with `repo` scope on that account.
-  #   3. Adding it as a repo secret named REGISTRY_PAT.
-  #   4. Uncommenting this job and adjusting `fork-owner` to that account's handle.
-  # ----------------------------------------------------------------------------------
-  #
-  # registry-pr:
-  #   needs: build-and-release
-  #   runs-on: ubuntu-latest
-  #   env:
-  #     REGISTRY_REPO: Toskan4134/maker-studio-mods
-  #     FORK_OWNER: your-github-handle
-  #   steps:
-  #     - name: Checkout fork
-  #       uses: actions/checkout@v4
-  #       with:
-  #         repository: ${{ env.FORK_OWNER }}/maker-studio-mods
-  #         token: ${{ secrets.REGISTRY_PAT }}
-  #         path: registry
-  #
-  #     - name: Update index.json
-  #       working-directory: registry
-  #       run: |
-  #         MOD_ID="${{ needs.build-and-release.outputs.mod-id }}"
-  #         VERSION="${{ needs.build-and-release.outputs.version }}"
-  #         ASSET="${{ needs.build-and-release.outputs.asset-name }}"
-  #         SHA="${{ needs.build-and-release.outputs.sha256 }}"
-  #         jq --arg id "$MOD_ID" --arg v "$VERSION" --arg a "$ASSET" --arg s "$SHA" \
-  #           '(.mods[] | select(.id == $id)) |= (.version = $v | .assetName = $a | .sha256 = $s)' \
-  #           index.json > index.json.tmp && mv index.json.tmp index.json
-  #
-  #     - name: Create PR
-  #       uses: peter-evans/create-pull-request@v6
-  #       with:
-  #         path: registry
-  #         token: ${{ secrets.REGISTRY_PAT }}
-  #         push-to-fork: ${{ env.FORK_OWNER }}/maker-studio-mods
-  #         branch: bump-${{ needs.build-and-release.outputs.mod-id }}-${{ needs.build-and-release.outputs.version }}
-  #         commit-message: "bump ${{ needs.build-and-release.outputs.mod-id }} to v${{ needs.build-and-release.outputs.version }}"
-  #         title: "bump ${{ needs.build-and-release.outputs.mod-id }} to v${{ needs.build-and-release.outputs.version }}"
-  #         body: |
-  #           Automated PR from `${{ github.repository }}` on release of v${{ needs.build-and-release.outputs.version }}.
-  #
-  #           - asset: `${{ needs.build-and-release.outputs.asset-name }}`
-  #           - sha256: `${{ needs.build-and-release.outputs.sha256 }}`
+  registry-pr:
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout registry
+        uses: actions/checkout@v4
+        with:
+          repository: Toskan4134/maker-studio-mods
+          token: ${{ secrets.REGISTRY_PAT }}
+          path: registry
+
+      - name: Update index.json
+        working-directory: registry
+        run: |
+          MOD_ID="${{ needs.build-and-release.outputs.mod-id }}"
+          VERSION="${{ needs.build-and-release.outputs.version }}"
+          ASSET="${{ needs.build-and-release.outputs.asset-name }}"
+          SHA="${{ needs.build-and-release.outputs.sha256 }}"
+          jq --arg id "$MOD_ID" --arg v "$VERSION" --arg a "$ASSET" --arg s "$SHA" \
+            '(.mods[] | select(.id == $id)) |= (.version = $v | .assetName = $a | .sha256 = $s)' \
+            index.json > index.json.tmp && mv index.json.tmp index.json
+
+      - name: Create PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          path: registry
+          token: ${{ secrets.REGISTRY_PAT }}
+          branch: bump-${{ needs.build-and-release.outputs.mod-id }}-${{ needs.build-and-release.outputs.version }}
+          commit-message: "bump ${{ needs.build-and-release.outputs.mod-id }} to v${{ needs.build-and-release.outputs.version }}"
+          title: "bump ${{ needs.build-and-release.outputs.mod-id }} to v${{ needs.build-and-release.outputs.version }}"
+          body: |
+            Automated PR from `${{ github.repository }}` on release of v${{ needs.build-and-release.outputs.version }}.
+
+            - asset: `${{ needs.build-and-release.outputs.asset-name }}`
+            - sha256: `${{ needs.build-and-release.outputs.sha256 }}`

@@ -42,8 +42,9 @@ function openPbsEditor(ctx) {
 export function activate(ctx) {
   ctx.menu.registerMenuItem({
     menu: 'Mods',
-    label: 'PBS Editor...',
+    label: 'Open PBS Editor',
     shortcut: 'Ctrl+Shift+P',
+    icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 1.5h5.5L13 5v9.5H4V1.5z"/><path d="M9.5 1.5V5H13"/><line x1="6" y1="7.5" x2="11" y2="7.5"/><line x1="6" y1="10" x2="11" y2="10"/><line x1="6" y1="12.5" x2="9" y2="12.5"/></svg>`,
     handler: () => openPbsEditor(ctx),
   });
 }

@@ -15,6 +15,14 @@ import {
   configureTypeIcons, clearTypeIcons,
 } from './components.js';
 
+let _t = s => s;
+export function setI18n(tFn) { _t = tFn; }
+
+// ---- Toolbar SVG icons (14px, Lucide-style) ----
+const _tbSvg = (d) => `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle">${d}</svg>`;
+const ICON_SAVE  = _tbSvg('<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>');
+const ICON_TRASH = _tbSvg('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>');
+
 const PAGE_SIZE = 50;
 
 export class PbsEditor {
@@ -135,7 +143,7 @@ export class PbsEditor {
 
   buildToolbar() {
     this.toolbar = h('div', { className: 'pbs-toolbar' });
-    this.toolbar.appendChild(h('span', { className: 'pbs-toolbar-title', textContent: 'PBS Editor' }));
+    this.toolbar.appendChild(h('span', { className: 'pbs-toolbar-title', textContent: _t('PBS Editor') }));
     this.toolbar.appendChild(h('div', { className: 'pbs-toolbar-sep' }));
     this.backBtn = h('button', { className: 'pbs-btn', textContent: '←', onClick: () => this.goBack(), disabled: true });
     this.forwardBtn = h('button', { className: 'pbs-btn', textContent: '→', onClick: () => this.goForward(), disabled: true });
@@ -153,13 +161,13 @@ export class PbsEditor {
     this.toolbar.appendChild(this.versionSelect);
     this.toolbar.appendChild(h('div', { className: 'pbs-toolbar-sep' }));
     this.toolbar.appendChild(h('div', { className: 'pbs-toolbar-spacer' }));
-    this.searchInput = searchBox('Search entries...', (q) => { this.searchQuery = q; this.pagination.reset(); this.renderTable(); });
+    this.searchInput = searchBox(_t('Search entries...'), (q) => { this.searchQuery = q; this.pagination.reset(); this.renderTable(); });
     this.toolbar.appendChild(this.searchInput);
     this.dirtyIndicator = h('span', { style: { display: 'none' } });
     this.toolbar.appendChild(this.dirtyIndicator);
-    this.toolbar.appendChild(button('\u{1F4BE} Save', () => this.saveCurrentFile(), 'primary'));
-    this.toolbar.appendChild(button('+ New', () => this.addEntry()));
-    this.toolbar.appendChild(button('\u{1F5D1} Delete', () => this.deleteEntry(), 'danger'));
+    this.toolbar.appendChild(button(`${ICON_SAVE} ${_t('Save')}`, () => this.saveCurrentFile(), 'primary'));
+    this.toolbar.appendChild(button(_t('+ New'), () => this.addEntry()));
+    this.toolbar.appendChild(button(`${ICON_TRASH} ${_t('Delete')}`, () => this.deleteEntry(), 'danger'));
     this.root.appendChild(this.toolbar);
   }
 
@@ -280,7 +288,7 @@ export class PbsEditor {
         className: `pbs-sidebar-item ${ft === this.currentFileType ? 'active' : ''}`,
         onClick: () => { if (!this._navigating) this.pushHistory(); this.selectFileType(ft); },
       });
-      const label = h('span', { className: 'pbs-sidebar-label', textContent: `${config.icon} ${config.label}` });
+      const label = h('span', { className: 'pbs-sidebar-label', innerHTML: `${config.icon} ${_t(config.label)}` });
       item.appendChild(label);
       const countBadge = badge('...');
       item.appendChild(countBadge);
@@ -309,8 +317,8 @@ export class PbsEditor {
   async selectFileType(ft) {
     if (this.currentFileType && this.dirty.has(this.currentFileType)) {
       const confirmed = await this.ctx.ui.showConfirmDialog({
-        title: 'Unsaved Changes',
-        message: `You have unsaved changes in ${this.currentFileType}. Discard?`,
+        title: _t('Unsaved Changes'),
+        message: _t('You have unsaved changes in {fileType}. Discard?', { fileType: this.currentFileType }),
         danger: true,
       });
       if (!confirmed) return;
@@ -330,7 +338,7 @@ export class PbsEditor {
     if (!this.entries[ft]) {
       const fname = getFilename(ft, this.version);
       if (fname) {
-        this.showLoading('Loading...');
+        this.showLoading(_t('Loading...'));
         try {
           const content = await this.readFile('PBS/' + fname);
           this.entries[ft] = parsePbsFile(content, ft, this.version);
@@ -478,7 +486,7 @@ export class PbsEditor {
     const ft = this.currentFileType;
     const config = getFileTypeConfig(ft);
     if (!config || !this.entries[ft]?.length) {
-      this.tableWrap.appendChild(h('div', { className: 'pbs-empty', textContent: this.entries[ft]?.length === 0 ? 'No entries in this file.' : 'Select a file type.' }));
+      this.tableWrap.appendChild(h('div', { className: 'pbs-empty', textContent: this.entries[ft]?.length === 0 ? _t('No entries in this file.') : _t('Select a file type.') }));
       this.pagination.setTotal(0);
       return;
     }
@@ -496,7 +504,7 @@ export class PbsEditor {
     const pageRows = allFiltered.slice(start, start + PAGE_SIZE);
 
     if (!pageRows.length) {
-      this.tableWrap.appendChild(h('div', { className: 'pbs-empty', textContent: 'No entries match search.' }));
+      this.tableWrap.appendChild(h('div', { className: 'pbs-empty', textContent: _t('No entries match search.') }));
       return;
     }
 
@@ -517,10 +525,10 @@ export class PbsEditor {
       onContextMenu: (x, y, pageIdx, row) => {
         const realIdx = this.entries[ft].indexOf(row);
         showContextMenu(x, y, [
-          { label: 'Duplicate', action: () => this.duplicateEntry(realIdx) },
-          { label: 'Toggle Exclude', action: () => this.toggleExclude(realIdx) },
+          { label: _t('Duplicate'), action: () => this.duplicateEntry(realIdx) },
+          { label: _t('Toggle Exclude'), action: () => this.toggleExclude(realIdx) },
           { separator: true },
-          { label: 'Delete', danger: true, action: () => this.deleteEntryAt(realIdx) },
+          { label: _t('Delete'), danger: true, action: () => this.deleteEntryAt(realIdx) },
         ], this.host);
       },
       onSort: () => {
@@ -585,7 +593,7 @@ export class PbsEditor {
     const displayVal = entry[config.displayField] || entry[config.headerField] || `Entry ${this.selectedIdx + 1}`;
     header.appendChild(h('span', { textContent: displayVal }));
     if (entry._excluded) {
-      header.appendChild(h('span', { textContent: '[Excluded]', style: { color: 'var(--warning)', fontSize: '10px' } }));
+      header.appendChild(h('span', { textContent: _t('[Excluded]'), style: { color: 'var(--warning)', fontSize: '10px' } }));
     }
     this.detailPanel.appendChild(header);
 
@@ -654,9 +662,9 @@ export class PbsEditor {
       this.dirty.delete(ft);
       this.originalEntries[ft] = JSON.parse(JSON.stringify(entries));
       this.updateDirtyIndicator();
-      this.ctx.ui.showToast({ message: `Saved ${fname}`, level: 'info' });
+      this.ctx.ui.showToast({ message: _t('Saved {file}', { file: fname }), level: 'info' });
     } catch (e) {
-      this.ctx.ui.showToast({ message: `Save failed: ${e.message}`, level: 'error' });
+      this.ctx.ui.showToast({ message: _t('Save failed: {error}', { error: e.message }), level: 'error' });
     }
   }
 
@@ -694,7 +702,7 @@ export class PbsEditor {
     const entries = this.entries[ft];
     const count = entries?.length || 0;
     const filtered = this.getPageEntries().length;
-    this.statusCount.textContent = filtered === count ? `${count} entries` : `${filtered} / ${count}`;
+    this.statusCount.textContent = filtered === count ? _t('{count} entries', { count }) : _t('{filtered} / {count}', { filtered, count });
     const fname = getFilename(ft, this.version);
     this.statusFile.textContent = fname ? `PBS/${fname}` : '';
   }
@@ -706,8 +714,8 @@ export class PbsEditor {
     const config = getFileTypeConfig(ft);
 
     const name = await this.ctx.ui.showInputDialog({
-      title: 'New Entry',
-      message: `Enter name for new ${config.label} entry:`,
+      title: _t('New Entry'),
+      message: _t('Enter name for new {type} entry:', { type: _t(config.label) }),
       placeholder: 'INTERNAL_NAME',
     });
     if (!name) return;
@@ -754,8 +762,8 @@ export class PbsEditor {
     const displayVal = entry[config.displayField] || entry[config.headerField] || `#${idx + 1}`;
 
     const confirmed = await this.ctx.ui.showConfirmDialog({
-      title: 'Delete Entry',
-      message: `Delete "${displayVal}"? This cannot be undone.`,
+      title: _t('Delete Entry'),
+      message: _t('Delete "{name}"? This cannot be undone.', { name: displayVal }),
       danger: true,
     });
     if (!confirmed) return;
@@ -811,7 +819,7 @@ export class PbsEditor {
 
   showLoading(msg) {
     this.tableWrap.innerHTML = '';
-    this.tableWrap.appendChild(h('div', { className: 'pbs-loading', textContent: msg || 'Loading...' }));
+    this.tableWrap.appendChild(h('div', { className: 'pbs-loading', textContent: msg || _t('Loading...') }));
   }
 
   showError(msg) {

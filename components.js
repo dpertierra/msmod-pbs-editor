@@ -4,6 +4,15 @@
 
 import { TYPE_COLORS } from './file-types.js';
 
+let _t = s => s;
+export function setI18n(tFn) { _t = tFn; }
+
+// ---- SVG preview icons (48px, Lucide-style) ----
+const _previewSvg = (d) => `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.5">${d}</svg>`;
+const ICON_PREVIEW    = _previewSvg('<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>');
+const ICON_LOADING    = _previewSvg('<path d="M21 12a9 9 0 1 1-6.219-8.56"/>');
+const ICON_NOT_FOUND = _previewSvg('<circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 14.14 14.14"/>');
+
 // ---- Type icon sprite (loaded from game project) ----
 let _typeIconUrl = null;
 let _typeIconW = 0;
@@ -109,7 +118,10 @@ export function h(tag, attrs, ...children) {
 }
 
 export function button(label, onClick, variant = '') {
-  return h('button', { className: `pbs-btn ${variant}`, onClick, textContent: label });
+  const cls = `pbs-btn ${variant}`;
+  return label && typeof label === 'string' && label.includes('<')
+    ? h('button', { className: cls, onClick, innerHTML: label })
+    : h('button', { className: cls, onClick, textContent: label });
 }
 
 export function badge(text) {
@@ -118,7 +130,7 @@ export function badge(text) {
 
 export function searchBox(placeholder, onInput) {
   let timer;
-  const input = h('input', { className: 'pbs-search', type: 'text', placeholder: placeholder || 'Search...', onInput: () => { clearTimeout(timer); timer = setTimeout(() => onInput(input.value), 150); } });
+  const input = h('input', { className: 'pbs-search', type: 'text', placeholder: placeholder || _t('Search...'), onInput: () => { clearTimeout(timer); timer = setTimeout(() => onInput(input.value), 150); } });
   return input;
 }
 
@@ -127,9 +139,9 @@ export function createPagination(onPage) {
   let current = 0;
   let totalPages = 1;
   const container = h('div', { className: 'pbs-pagination' });
-  const prevBtn = h('button', { className: 'pbs-page-btn', textContent: '← Prev', onClick: () => { if (current > 0) { current--; update(); onPage(current); } } });
+  const prevBtn = h('button', { className: 'pbs-page-btn', textContent: _t('← Prev'), onClick: () => { if (current > 0) { current--; update(); onPage(current); } } });
   const info = h('span', { textContent: '' });
-  const nextBtn = h('button', { className: 'pbs-page-btn', textContent: 'Next →', onClick: () => { if (current < totalPages - 1) { current++; update(); onPage(current); } } });
+  const nextBtn = h('button', { className: 'pbs-page-btn', textContent: _t('Next →'), onClick: () => { if (current < totalPages - 1) { current++; update(); onPage(current); } } });
   container.appendChild(prevBtn);
   container.appendChild(info);
   container.appendChild(nextBtn);
@@ -137,7 +149,7 @@ export function createPagination(onPage) {
   function update() {
     prevBtn.disabled = current <= 0;
     nextBtn.disabled = current >= totalPages - 1;
-    info.textContent = `Page ${current + 1} of ${totalPages}`;
+    info.textContent = _t('Page {current} of {total}', { current: current + 1, total: totalPages });
   }
   function setTotal(total) { totalPages = Math.max(1, total); if (current >= totalPages) current = totalPages - 1; update(); }
   function getPage() { return current; }
@@ -156,8 +168,8 @@ let _animInterval = null;
 export function createPreviewPanel(loadImageFn) {
   const panel = h('div', { className: 'pbs-preview' });
   const placeholder = h('div', { className: 'pbs-preview-placeholder' });
-  placeholder.appendChild(h('div', { className: 'pbs-preview-placeholder-icon', textContent: '\u{1F3A8}' }));
-  placeholder.appendChild(h('div', { textContent: 'Select an entry to preview' }));
+  placeholder.appendChild(h('div', { className: 'pbs-preview-placeholder-icon', innerHTML: ICON_PREVIEW }));
+  placeholder.appendChild(h('div', { textContent: _t('Select an entry to preview') }));
   panel.appendChild(placeholder);
 
   function stopAnim() {
@@ -169,24 +181,24 @@ export function createPreviewPanel(loadImageFn) {
     panel.innerHTML = '';
     if (!path) {
       const ph = h('div', { className: 'pbs-preview-placeholder' });
-      ph.appendChild(h('div', { className: 'pbs-preview-placeholder-icon', textContent: '\u{1F3A8}' }));
-      ph.appendChild(h('div', { textContent: 'No graphic' }));
+      ph.appendChild(h('div', { className: 'pbs-preview-placeholder-icon', innerHTML: ICON_PREVIEW }));
+      ph.appendChild(h('div', { textContent: _t('No graphic') }));
       panel.appendChild(ph);
       panel.appendChild(h('div', { className: 'pbs-preview-name', textContent: displayName || '' }));
       return;
     }
     if (!loadImageFn) {
       const ph = h('div', { className: 'pbs-preview-placeholder' });
-      ph.appendChild(h('div', { className: 'pbs-preview-placeholder-icon', textContent: '\u{1F3A8}' }));
-      ph.appendChild(h('div', { textContent: 'No loader' }));
+      ph.appendChild(h('div', { className: 'pbs-preview-placeholder-icon', innerHTML: ICON_PREVIEW }));
+      ph.appendChild(h('div', { textContent: _t('No loader') }));
       panel.appendChild(ph);
       panel.appendChild(h('div', { className: 'pbs-preview-name', textContent: displayName || '' }));
       return;
     }
     const absPath = (gameRoot || '').replace(/\\/g, '/') + '/' + path;
     const loading = h('div', { className: 'pbs-preview-placeholder' });
-    loading.appendChild(h('div', { className: 'pbs-preview-placeholder-icon', textContent: '⏳' }));
-    loading.appendChild(h('div', { textContent: 'Loading...' }));
+    loading.appendChild(h('div', { className: 'pbs-preview-placeholder-icon', innerHTML: ICON_LOADING }));
+    loading.appendChild(h('div', { textContent: _t('Loading...') }));
     panel.appendChild(loading);
 
     const panelName = displayName || '';
@@ -196,9 +208,9 @@ export function createPreviewPanel(loadImageFn) {
       if (!url) {
         panel.innerHTML = '';
         const ph = h('div', { className: 'pbs-preview-placeholder' });
-        ph.appendChild(h('div', { className: 'pbs-preview-placeholder-icon', textContent: '❓' }));
+        ph.appendChild(h('div', { className: 'pbs-preview-placeholder-icon', innerHTML: ICON_NOT_FOUND }));
         ph.appendChild(h('div', { textContent: path.split('/').pop() }));
-        ph.appendChild(h('div', { textContent: 'Not found', style: { fontSize: '10px' } }));
+        ph.appendChild(h('div', { textContent: _t('Not found'), style: { fontSize: '10px' } }));
         panel.appendChild(ph);
         panel.appendChild(h('div', { className: 'pbs-preview-name', textContent: panelName }));
         return;
@@ -240,7 +252,7 @@ export function createPreviewPanel(loadImageFn) {
       img.onerror = () => {
         panel.innerHTML = '';
         const ph = h('div', { className: 'pbs-preview-placeholder' });
-        ph.appendChild(h('div', { className: 'pbs-preview-placeholder-icon', textContent: '❓' }));
+        ph.appendChild(h('div', { className: 'pbs-preview-placeholder-icon', innerHTML: ICON_NOT_FOUND }));
         ph.appendChild(h('div', { textContent: path.split('/').pop() }));
         panel.appendChild(ph);
         panel.appendChild(h('div', { className: 'pbs-preview-name', textContent: panelName }));
@@ -249,7 +261,7 @@ export function createPreviewPanel(loadImageFn) {
     }).catch(() => {
       panel.innerHTML = '';
       const ph = h('div', { className: 'pbs-preview-placeholder' });
-      ph.appendChild(h('div', { className: 'pbs-preview-placeholder-icon', textContent: '❓' }));
+      ph.appendChild(h('div', { className: 'pbs-preview-placeholder-icon', innerHTML: ICON_NOT_FOUND }));
       ph.appendChild(h('div', { textContent: path.split('/').pop() }));
       panel.appendChild(ph);
       panel.appendChild(h('div', { className: 'pbs-preview-name', textContent: panelName }));
@@ -260,8 +272,8 @@ export function createPreviewPanel(loadImageFn) {
     stopAnim();
     panel.innerHTML = '';
     const ph = h('div', { className: 'pbs-preview-placeholder' });
-    ph.appendChild(h('div', { className: 'pbs-preview-placeholder-icon', textContent: '\u{1F3A8}' }));
-    ph.appendChild(h('div', { textContent: 'Select an entry' }));
+    ph.appendChild(h('div', { className: 'pbs-preview-placeholder-icon', innerHTML: ICON_PREVIEW }));
+    ph.appendChild(h('div', { textContent: _t('Select an entry') }));
     panel.appendChild(ph);
   }
 
@@ -322,7 +334,7 @@ export function createTable(columns, rows, options = {}) {
     for (let i = 0; i < columns.length; i++) {
       const col = columns[i];
       const th = h('th', { style: { width: (col.width || 80) + 'px' } });
-      th.textContent = col.label;
+      th.textContent = _t(col.label);
       if (i === sortCol) th.appendChild(h('span', { className: 'pbs-sort-arrow', textContent: sortDir === 1 ? '▲' : '▼' }));
       th.addEventListener('click', () => { if (sortCol === i) sortDir = -sortDir; else { sortCol = i; sortDir = 1; } render(); options.onSort?.(); });
       tr.appendChild(th);
@@ -361,7 +373,7 @@ export function createSectionToggle(label) {
   const toggle = h('button', { className: 'pbs-section-toggle' });
   const arrow = h('span', { className: 'pbs-section-arrow open', textContent: '▶' });
   toggle.appendChild(arrow);
-  toggle.appendChild(h('span', { textContent: label }));
+  toggle.appendChild(h('span', { textContent: _t(label) }));
   const body = h('div', { className: 'pbs-section-body', style: { display: 'block' } });
   toggle.addEventListener('click', () => { open = !open; arrow.className = `pbs-section-arrow ${open ? 'open' : ''}`; body.style.display = open ? 'block' : 'none'; });
   return { toggle, body };
@@ -377,7 +389,7 @@ function goToBtn(refKey, getValue, onNavigate) {
 // ---- Field editors ----
 export function createFieldEditor(fieldDef, value, onChange, refData, ctx, onNavigate) {
   const wrap = h('div', { className: `pbs-field ${fieldDef.fullWidth ? 'full-width' : ''}` });
-  wrap.appendChild(h('label', { textContent: fieldDef.label }));
+  wrap.appendChild(h('label', { textContent: _t(fieldDef.label) }));
   const type = fieldDef.type || 'text';
 
   // Get suggestions for reference fields
@@ -430,8 +442,8 @@ export function createFieldEditor(fieldDef, value, onChange, refData, ctx, onNav
     const cb = h('input', { type: 'checkbox', checked: value === 'true' || value === true });
     cb.addEventListener('change', () => onChange(cb.checked ? 'true' : 'false'));
     row.appendChild(cb);
-    const lbl = h('span', { textContent: value === 'true' ? 'Yes' : 'No', style: { fontSize: '11px', color: 'var(--text-secondary)' } });
-    cb.addEventListener('change', () => { lbl.textContent = cb.checked ? 'Yes' : 'No'; });
+    const lbl = h('span', { textContent: value === 'true' ? _t('Yes') : _t('No'), style: { fontSize: '11px', color: 'var(--text-secondary)' } });
+    cb.addEventListener('change', () => { lbl.textContent = cb.checked ? _t('Yes') : _t('No'); });
     row.appendChild(lbl);
     wrap.appendChild(row);
     return { el: wrap, getValue: () => cb.checked ? 'true' : 'false', setValue: (v) => { cb.checked = v === 'true'; } };
@@ -538,7 +550,7 @@ function createListEditor(items, onChange, suggestions, onNavigate, refKey, type
       row.appendChild(h('button', { className: 'pbs-list-remove', textContent: '×', onClick: () => { items.splice(i, 1); render(); emitChange(); } }));
       container.appendChild(row);
     }
-    container.appendChild(h('button', { className: 'pbs-list-add', textContent: '+ Add', onClick: () => { items.push(''); render(); } }));
+    container.appendChild(h('button', { className: 'pbs-list-add', textContent: _t('+ Add'), onClick: () => { items.push(''); render(); } }));
   }
   function emitChange() { onChange(items.filter(Boolean).join(',')); }
   render();
@@ -553,7 +565,7 @@ function createPairsEditor(pairs, labels, onChange, suggestions, onNavigate, ref
     for (let i = 0; i < pairs.length; i++) {
       const row = h('div', { className: 'pbs-list-row' });
       // First column (always plain input)
-      const inp0 = h('input', { value: pairs[i][0], placeholder: labels[0], style: { width: '40px', flex: 'none' } });
+      const inp0 = h('input', { value: pairs[i][0], placeholder: _t(labels[0]), style: { width: '40px', flex: 'none' } });
       const ii0 = i;
       inp0.addEventListener('input', () => { pairs[ii0][0] = inp0.value; emitChange(); });
       row.appendChild(inp0);
@@ -564,7 +576,7 @@ function createPairsEditor(pairs, labels, onChange, suggestions, onNavigate, ref
         ref.el.style.minWidth = '0';
         row.appendChild(ref.el);
       } else {
-        const inp1 = h('input', { value: pairs[i][1], placeholder: labels[1] });
+        const inp1 = h('input', { value: pairs[i][1], placeholder: _t(labels[1]) });
         const ii1 = i;
         inp1.addEventListener('input', () => { pairs[ii1][1] = inp1.value; emitChange(); });
         row.appendChild(inp1);
@@ -574,7 +586,7 @@ function createPairsEditor(pairs, labels, onChange, suggestions, onNavigate, ref
       row.appendChild(h('button', { className: 'pbs-list-remove', textContent: '×', onClick: () => { pairs.splice(i, 1); render(); emitChange(); } }));
       container.appendChild(row);
     }
-    container.appendChild(h('button', { className: 'pbs-list-add', textContent: '+ Add', onClick: () => { pairs.push(['', '']); render(); } }));
+    container.appendChild(h('button', { className: 'pbs-list-add', textContent: _t('+ Add'), onClick: () => { pairs.push(['', '']); render(); } }));
   }
   function emitChange() { onChange(pairs.map(p => `${p[0]},${p[1]}`).join(',')); }
   render();
@@ -595,14 +607,14 @@ function createTripletsEditor(trips, labels, onChange, suggestions, onNavigate, 
         ref.el.style.flex = 'none';
         row.appendChild(ref.el);
       } else {
-        const inp = h('input', { value: trips[i][0] || '', placeholder: labels[0], style: { width: '70px', flex: 'none' } });
+        const inp = h('input', { value: trips[i][0] || '', placeholder: _t(labels[0]), style: { width: '70px', flex: 'none' } });
         const ii0 = i;
         inp.addEventListener('input', () => { trips[ii0][0] = inp.value; emitChange(); });
         row.appendChild(inp);
       }
       // Remaining columns
       for (let j = 1; j < labels.length; j++) {
-        const inp = h('input', { value: trips[i][j] || '', placeholder: labels[j] });
+        const inp = h('input', { value: trips[i][j] || '', placeholder: _t(labels[j]) });
         const ii = i, jj = j;
         inp.addEventListener('input', () => { trips[ii][jj] = inp.value; emitChange(); });
         row.appendChild(inp);
@@ -612,7 +624,7 @@ function createTripletsEditor(trips, labels, onChange, suggestions, onNavigate, 
       row.appendChild(h('button', { className: 'pbs-list-remove', textContent: '×', onClick: () => { trips.splice(i, 1); render(); emitChange(); } }));
       container.appendChild(row);
     }
-    container.appendChild(h('button', { className: 'pbs-list-add', textContent: '+ Add', onClick: () => { trips.push(['', '', '']); render(); } }));
+    container.appendChild(h('button', { className: 'pbs-list-add', textContent: _t('+ Add'), onClick: () => { trips.push(['', '', '']); render(); } }));
   }
   function emitChange() { onChange(trips.map(t => `${t[0]},${t[1]},${t[2]}`).join(',')); }
   render();
@@ -716,7 +728,7 @@ function createEvsEditor(value, onChange) {
       row.appendChild(h('button', { className: 'pbs-list-remove', textContent: '×', onClick: () => { pairs.splice(i, 1); render(); emitChange(); } }));
       container.appendChild(row);
     }
-    container.appendChild(h('button', { className: 'pbs-list-add', textContent: '+ Add EV', onClick: () => { pairs.push({ stat: 'HP', val: 0 }); render(); emitChange(); } }));
+    container.appendChild(h('button', { className: 'pbs-list-add', textContent: _t('+ Add EV'), onClick: () => { pairs.push({ stat: 'HP', val: 0 }); render(); emitChange(); } }));
   }
   render();
   return { el: container, getValue: () => pairs.map(p => `${p.stat},${p.val}`).join(',') };
@@ -730,7 +742,7 @@ function createBgmEditor(value, onChange, ctx) {
   row.appendChild(input);
 
   if (ctx?.selectors?.pickAudio) {
-    const browseBtn = h('button', { className: 'pbs-btn', textContent: 'Browse', onClick: async () => {
+    const browseBtn = h('button', { className: 'pbs-btn', textContent: _t('Browse'), onClick: async () => {
       try {
         const result = await ctx.selectors.pickAudio('BGM');
         if (result) {
@@ -764,7 +776,7 @@ export function createEncounterEditor(entry, onChange, onRebuild, refData, onNav
     typeSelect.addEventListener('change', () => { enc.type = typeSelect.value; onChange(); });
     header.appendChild(typeSelect);
 
-    header.appendChild(h('span', { textContent: 'Density:', style: { fontSize: '10px', color: 'var(--text-tertiary)', marginLeft: '6px' } }));
+    header.appendChild(h('span', { textContent: _t('Density:'), style: { fontSize: '10px', color: 'var(--text-tertiary)', marginLeft: '6px' } }));
     const densityInp = h('input', { type: 'number', value: enc.density || '20', min: 1, max: 999, style: { width: '40px', fontSize: '11px', padding: '1px 4px', background: 'var(--input-bg)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '3px' } });
     densityInp.addEventListener('input', () => { enc.density = densityInp.value; onChange(); });
     header.appendChild(densityInp);
@@ -779,9 +791,9 @@ export function createEncounterEditor(entry, onChange, onRebuild, refData, onNav
     const colHeader = h('div', { className: 'pbs-list-row', style: { fontWeight: '600', fontSize: '10px', color: 'var(--text-tertiary)' } });
     colHeader.appendChild(h('span', { style: { width: '30px', flexShrink: '0' }, textContent: '#' }));
     colHeader.appendChild(h('span', { style: { width: '45px' }, textContent: 'Prob' }));
-    colHeader.appendChild(h('span', { style: { flex: '1' }, textContent: 'Pokemon' }));
-    colHeader.appendChild(h('span', { style: { width: '45px' }, textContent: 'Min Lv' }));
-    colHeader.appendChild(h('span', { style: { width: '45px' }, textContent: 'Max Lv' }));
+    colHeader.appendChild(h('span', { style: { flex: '1' }, textContent: _t('Pokemon') }));
+    colHeader.appendChild(h('span', { style: { width: '45px' }, textContent: _t('Min Lv') }));
+    colHeader.appendChild(h('span', { style: { width: '45px' }, textContent: _t('Max Lv') }));
     colHeader.appendChild(h('span', { style: { width: '20px' } }));
     body.appendChild(colHeader);
 
@@ -830,7 +842,7 @@ export function createEncounterEditor(entry, onChange, onRebuild, refData, onNav
         body.appendChild(row);
       }
 
-      body.appendChild(h('button', { className: 'pbs-list-add', textContent: '+ Add Pokemon', onClick: () => {
+      body.appendChild(h('button', { className: 'pbs-list-add', textContent: _t('+ Add Pokemon'), onClick: () => {
         enc.pokemons.push('20,SPECIES,5,5');
         onChange();
         buildPokemonRows();
@@ -847,7 +859,7 @@ export function createEncounterEditor(entry, onChange, onRebuild, refData, onNav
     for (let ei = 0; ei < (entry._encounters || []).length; ei++) {
       container.appendChild(buildEncounter(ei, entry._encounters[ei]));
     }
-    container.appendChild(h('button', { className: 'pbs-list-add', textContent: '+ Add Encounter Type', style: { marginTop: '4px' }, onClick: () => {
+    container.appendChild(h('button', { className: 'pbs-list-add', textContent: _t('+ Add Encounter Type'), style: { marginTop: '4px' }, onClick: () => {
       entry._encounters.push({ type: 'Land', density: '20', pokemons: [] });
       onChange();
       renderAll();
@@ -870,7 +882,7 @@ export function createTrainerPokemonEditor(entry, onChange, onRebuild, refData, 
       const p = entry._pokemon[pi];
       const sub = h('div', { className: 'pbs-subsection' });
       const header = h('div', { className: 'pbs-subsection-header' });
-      header.appendChild(h('span', { textContent: `Pokemon ${pi + 1}` }));
+      header.appendChild(h('span', { textContent: _t('Pokemon {n}', { n: pi + 1 }) }));
       header.appendChild(h('button', { className: 'pbs-list-remove', textContent: '×', onClick: () => { entry._pokemon.splice(pi, 1); onRebuild(); } }));
       sub.appendChild(header);
       const body = h('div', { className: 'pbs-subsection-body', style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 8px' } });
@@ -882,7 +894,7 @@ export function createTrainerPokemonEditor(entry, onChange, onRebuild, refData, 
 
       // Species
       const speciesField = h('div', { className: 'pbs-field' });
-      speciesField.appendChild(h('label', { textContent: 'Species' }));
+      speciesField.appendChild(h('label', { textContent: _t('Species') }));
       const speciesRow = h('div', { style: { display: 'flex', gap: '2px', alignItems: 'center' } });
       const speciesRef = createRefInput(species, pokemonSuggestions, (v) => {
         pokeParts[0] = v;
@@ -899,7 +911,7 @@ export function createTrainerPokemonEditor(entry, onChange, onRebuild, refData, 
 
       // Level
       const levelField = h('div', { className: 'pbs-field' });
-      levelField.appendChild(h('label', { textContent: 'Level' }));
+      levelField.appendChild(h('label', { textContent: _t('Level') }));
       const levelInp = h('input', { type: 'number', value: level, min: 1, max: 100, placeholder: 'Level' });
       levelInp.addEventListener('input', () => {
         pokeParts[1] = levelInp.value;
@@ -911,7 +923,7 @@ export function createTrainerPokemonEditor(entry, onChange, onRebuild, refData, 
 
       // Item (referenced)
       const itemField = h('div', { className: 'pbs-field' });
-      itemField.appendChild(h('label', { textContent: 'Item' }));
+      itemField.appendChild(h('label', { textContent: _t('Item') }));
       const itemRow = h('div', { style: { display: 'flex', gap: '2px', alignItems: 'center' } });
       const itemRef = createRefInput(p.Item || '', itemSuggestions, (v) => { p.Item = v; onChange(); });
       itemRef.el.style.flex = '1';
@@ -924,7 +936,7 @@ export function createTrainerPokemonEditor(entry, onChange, onRebuild, refData, 
 
       // AbilityIndex
       const abilityField = h('div', { className: 'pbs-field' });
-      abilityField.appendChild(h('label', { textContent: 'Ability Index' }));
+      abilityField.appendChild(h('label', { textContent: _t('Ability Index') }));
       const abilityInp = h('input', { type: 'number', value: p.AbilityIndex || '', min: 0, placeholder: '0' });
       abilityInp.addEventListener('input', () => { p.AbilityIndex = abilityInp.value; onChange(); });
       abilityField.appendChild(abilityInp);
@@ -932,7 +944,7 @@ export function createTrainerPokemonEditor(entry, onChange, onRebuild, refData, 
 
       // Moves (list with move references)
       const movesField = h('div', { className: 'pbs-field', style: { gridColumn: '1 / -1' } });
-      movesField.appendChild(h('label', { textContent: 'Moves' }));
+      movesField.appendChild(h('label', { textContent: _t('Moves') }));
       const movesItems = (p.Moves || '').split(',').filter(Boolean);
       const movesEditor = createListEditor(movesItems, (v) => { p.Moves = v; onChange(); }, moveSuggestions, onNavigate, 'moves');
       movesField.appendChild(movesEditor.el);
@@ -940,7 +952,7 @@ export function createTrainerPokemonEditor(entry, onChange, onRebuild, refData, 
 
       // Nature
       const natureField = h('div', { className: 'pbs-field' });
-      natureField.appendChild(h('label', { textContent: 'Nature' }));
+      natureField.appendChild(h('label', { textContent: _t('Nature') }));
       const natureInp = h('input', { type: 'text', value: p.Nature || '', placeholder: 'Nature' });
       natureInp.addEventListener('input', () => { p.Nature = natureInp.value; onChange(); });
       natureField.appendChild(natureInp);
@@ -948,7 +960,7 @@ export function createTrainerPokemonEditor(entry, onChange, onRebuild, refData, 
 
       // Gender
       const genderField = h('div', { className: 'pbs-field' });
-      genderField.appendChild(h('label', { textContent: 'Gender' }));
+      genderField.appendChild(h('label', { textContent: _t('Gender') }));
       const genderInp = h('input', { type: 'text', value: p.Gender || '', placeholder: 'M/F' });
       genderInp.addEventListener('input', () => { p.Gender = genderInp.value; onChange(); });
       genderField.appendChild(genderInp);
@@ -956,7 +968,7 @@ export function createTrainerPokemonEditor(entry, onChange, onRebuild, refData, 
 
       // Form
       const formField = h('div', { className: 'pbs-field' });
-      formField.appendChild(h('label', { textContent: 'Form' }));
+      formField.appendChild(h('label', { textContent: _t('Form') }));
       const formInp = h('input', { type: 'number', value: p.Form || '', min: 0, placeholder: '0' });
       formInp.addEventListener('input', () => { p.Form = formInp.value; onChange(); });
       formField.appendChild(formInp);
@@ -964,11 +976,11 @@ export function createTrainerPokemonEditor(entry, onChange, onRebuild, refData, 
 
       // Shiny
       const shinyField = h('div', { className: 'pbs-field' });
-      shinyField.appendChild(h('label', { textContent: 'Shiny' }));
+      shinyField.appendChild(h('label', { textContent: _t('Shiny') }));
       const shinyRow = h('div', { style: { display: 'flex', alignItems: 'center', gap: '4px' } });
       const shinyCb = h('input', { type: 'checkbox', checked: p.Shiny === 'true' || p.Shiny === true });
-      const shinyLbl = h('span', { textContent: p.Shiny === 'true' ? 'Yes' : 'No', style: { fontSize: '11px', color: 'var(--text-secondary)' } });
-      shinyCb.addEventListener('change', () => { p.Shiny = shinyCb.checked ? 'true' : 'false'; shinyLbl.textContent = shinyCb.checked ? 'Yes' : 'No'; onChange(); });
+      const shinyLbl = h('span', { textContent: p.Shiny === 'true' ? _t('Yes') : _t('No'), style: { fontSize: '11px', color: 'var(--text-secondary)' } });
+      shinyCb.addEventListener('change', () => { p.Shiny = shinyCb.checked ? 'true' : 'false'; shinyLbl.textContent = shinyCb.checked ? _t('Yes') : _t('No'); onChange(); });
       shinyRow.appendChild(shinyCb);
       shinyRow.appendChild(shinyLbl);
       shinyField.appendChild(shinyRow);
@@ -976,14 +988,14 @@ export function createTrainerPokemonEditor(entry, onChange, onRebuild, refData, 
 
       // IV (full width, structured like EVs)
       const ivField = h('div', { className: 'pbs-field', style: { gridColumn: '1 / -1' } });
-      ivField.appendChild(h('label', { textContent: 'IVs' }));
+      ivField.appendChild(h('label', { textContent: _t('IVs') }));
       const ivEditor = createEvsEditor(p.IV || '', (v) => { p.IV = v; onChange(); });
       ivField.appendChild(ivEditor.el);
       body.appendChild(ivField);
 
       // EV (full width)
       const evField = h('div', { className: 'pbs-field', style: { gridColumn: '1 / -1' } });
-      evField.appendChild(h('label', { textContent: 'EVs' }));
+      evField.appendChild(h('label', { textContent: _t('EVs') }));
       const evEditor = createEvsEditor(p.EV || '', (v) => { p.EV = v; onChange(); });
       evField.appendChild(evEditor.el);
       body.appendChild(evField);
@@ -991,7 +1003,7 @@ export function createTrainerPokemonEditor(entry, onChange, onRebuild, refData, 
       sub.appendChild(body);
       container.appendChild(sub);
     }
-    container.appendChild(h('button', { className: 'pbs-list-add', textContent: '+ Add Pokemon', style: { marginTop: '4px' }, onClick: () => { entry._pokemon.push({ Pokemon: '' }); onRebuild(); } }));
+    container.appendChild(h('button', { className: 'pbs-list-add', textContent: _t('+ Add Pokemon'), style: { marginTop: '4px' }, onClick: () => { entry._pokemon.push({ Pokemon: '' }); onRebuild(); } }));
   }
   renderAll();
   return container;

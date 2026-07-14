@@ -3,17 +3,24 @@
  * 3-column dialog: sidebar | table+pagination | preview+detail
  */
 
-import { parsePbsFile, detectVersion, getFilename, getAvailableFileTypes, FILE_MAP } from './parsers.js';
-import { writePbsFile } from './writers.js';
-import { CSS } from './styles.js';
-import { getFileTypeConfig, getPrimaryGraphic, TYPE_COLORS, typeBadge } from './file-types.js';
 import {
-  h, button, searchBox, badge, showContextMenu,
-  createTable, createFieldEditor,
-  createEncounterEditor, createTrainerPokemonEditor,
+  badge,
+  button,
+  clearTypeIcons,
+  configureTypeIcons,
+  createEncounterEditor,
+  createFieldEditor,
   createPagination, createPreviewPanel, createSectionToggle,
-  configureTypeIcons, clearTypeIcons,
+  createTable,
+  createTrainerPokemonEditor,
+  h,
+  searchBox,
+  showContextMenu,
 } from './components.js';
+import { getFileTypeConfig, getPrimaryGraphic } from './file-types.js';
+import { getAvailableFileTypes, getFilename, matchFileType, parsePbsFile } from './parsers.js';
+import { CSS } from './styles.js';
+import { writePbsFile } from './writers.js';
 
 let _t = s => s;
 export function setI18n(tFn) { _t = tFn; }
@@ -33,6 +40,7 @@ export class PbsEditor {
     this.currentFileType = null;
     this.entries = {};
     this.originalEntries = {};
+    this.files = {};
     this.selectedIdx = -1;
     this.dirty = new Set();
     this.searchQuery = '';
@@ -75,6 +83,58 @@ export class PbsEditor {
       };
       img.src = url;
     } catch { /* sprite not found — colored fallback used */ }
+  }
+
+
+  async resolveTownMapPath(filename) {
+    const stem = (filename || '').trim().replace(/^[/\\]+/, '').replace(/\.[^.]+$/, '');
+    if (!stem) return null;
+    const base = (this.gameRoot || '').replace(/\\/g, '/');
+    for (const c of [
+      `Graphics/UI/Town Map/${stem}.png`,
+      `Graphics/Pictures/${stem}.png`,
+      `Graphics/${stem}.png`,
+    ]) {
+      const url = await this.loadImageBlob(base + '/' + c);
+      if (url) { URL.revokeObjectURL(url); return c; }
+    }
+    return await this.findGraphicFile('Graphics', stem);
+  }
+
+  async findGraphicFile(dir, stem) {
+    const key = dir.toLowerCase() + '|' + stem.toLowerCase();
+    this._graphicSearchCache ||= new Map();
+    if (this._graphicSearchCache.has(key)) return this._graphicSearchCache.get(key);
+    this._graphicSearchCache.set(key, null); // guards against cycles / re-search
+
+    let entries = [];
+    try {
+      const list = await this.ctx.fs.listProjectDir(dir);
+      entries = (list || []).map(e => (typeof e === 'string' ? e : (e?.name || e?.path || '')));
+    } catch { entries = []; }
+
+    const norm = dir.replace(/\/+$/, '');
+    const want = stem.toLowerCase();
+    // First pass: any returned entry whose basename stem matches.
+    for (const e of entries) {
+      const clean = e.replace(/^[/\\]+/, '');
+      const baseName = clean.split(/[\\/]/).pop();
+      if (!baseName) continue;
+      if (baseName.replace(/\.[^.]+$/, '').toLowerCase() === want) {
+        const full = `${norm}/${clean}`.replace(/\/{2,}/g, '/');
+        this._graphicSearchCache.set(key, full);
+        return full;
+      }
+    }
+    // Second pass: recurse into immediate subdirectories.
+    for (const e of entries) {
+      const clean = e.replace(/^[/\\]+/, '');
+      if (!clean || clean.includes('/') || clean.includes('\\')) continue; // nested or empty
+      if (/\.[^.]+$/.test(clean)) continue; // a file, not a folder
+      const found = await this.findGraphicFile(`${norm}/${clean}`, stem);
+      if (found) { this._graphicSearchCache.set(key, found); return found; }
+    }
+    return null;
   }
 
   async loadMetrics() {    if (this._metricsCache) return this._metricsCache;
@@ -266,6 +326,7 @@ export class PbsEditor {
     clearTypeIcons();
     this.loadTypeIcons();
 
+    await this.scanPbsDir();
     this.buildSidebar();
     this.pagination.reset();
     this.renderDetail();
@@ -275,6 +336,52 @@ export class PbsEditor {
 
     const types = getAvailableFileTypes(this.version);
     if (types.length) await this.selectFileType(types[0]);
+  }
+
+  // ---- PBS files ----
+  // A file type can span several files: the base one plus any `<base>_*.txt`
+  // extras a pack dropped in, which Essentials compiles together.
+  async scanPbsDir() {
+    this.files = {};
+    let names = [];
+    try {
+      const list = await this.ctx.fs.listProjectDir('PBS/');
+      names = (list || [])
+        .map(e => (typeof e === 'string' ? e : e?.name || e?.path || ''))
+        .map(n => n.split(/[\\/]/).pop())
+        .filter(n => /\.txt$/i.test(n));
+    } catch { /* no listing available — fall back to the base file only */ }
+
+    for (const name of names.sort()) {
+      const ft = matchFileType(name, this.version);
+      if (!ft) continue;
+      (this.files[ft] ||= []).push(name);
+    }
+    // Base file first: it's where new entries go, and it keeps compile order.
+    for (const ft of Object.keys(this.files)) {
+      const base = getFilename(ft, this.version);
+      this.files[ft].sort((a, b) => (a === base ? -1 : b === base ? 1 : 0));
+    }
+  }
+
+  filesFor(ft) {
+    if (this.files[ft]?.length) return this.files[ft];
+    const base = getFilename(ft, this.version);
+    return base ? [base] : [];
+  }
+
+  async loadEntries(ft) {
+    const all = [];
+    for (const fname of this.filesFor(ft)) {
+      try {
+        const content = await this.readFile('PBS/' + fname);
+        for (const entry of parsePbsFile(content, ft, this.version)) {
+          entry._file = fname;   // remembered so saving writes it back where it came from
+          all.push(entry);
+        }
+      } catch { /* file listed but unreadable — skip it */ }
+    }
+    return all;
   }
 
   // ---- Sidebar ----
@@ -298,19 +405,12 @@ export class PbsEditor {
   }
 
   async loadFileCount(ft, badgeEl) {
-    const fname = getFilename(ft, this.version);
-    if (!fname) { badgeEl.textContent = '0'; return; }
-    try {
-      const content = await this.readFile('PBS/' + fname);
-      if (!this.entries[ft]) {
-        this.entries[ft] = parsePbsFile(content, ft, this.version);
-        this.originalEntries[ft] = JSON.parse(JSON.stringify(this.entries[ft]));
-      }
-      badgeEl.textContent = String(this.entries[ft].length);
-    } catch {
-      badgeEl.textContent = '—';
-      if (!this.entries[ft]) this.entries[ft] = [];
+    if (!this.filesFor(ft).length) { badgeEl.textContent = '0'; return; }
+    if (!this.entries[ft]) {
+      this.entries[ft] = await this.loadEntries(ft);
+      this.originalEntries[ft] = JSON.parse(JSON.stringify(this.entries[ft]));
     }
+    badgeEl.textContent = String(this.entries[ft].length);
   }
 
   // ---- File selection ----
@@ -336,21 +436,9 @@ export class PbsEditor {
     items.forEach((el, i) => el.classList.toggle('active', types[i] === ft));
 
     if (!this.entries[ft]) {
-      const fname = getFilename(ft, this.version);
-      if (fname) {
-        this.showLoading(_t('Loading...'));
-        try {
-          const content = await this.readFile('PBS/' + fname);
-          this.entries[ft] = parsePbsFile(content, ft, this.version);
-          this.originalEntries[ft] = JSON.parse(JSON.stringify(this.entries[ft]));
-        } catch {
-          this.entries[ft] = [];
-          this.originalEntries[ft] = [];
-        }
-      } else {
-        this.entries[ft] = [];
-        this.originalEntries[ft] = [];
-      }
+      this.showLoading(_t('Loading...'));
+      this.entries[ft] = await this.loadEntries(ft);
+      this.originalEntries[ft] = JSON.parse(JSON.stringify(this.entries[ft]));
     }
 
     // Select first entry in default sort order (column 0 ascending)
@@ -562,6 +650,13 @@ export class PbsEditor {
       return;
     }
 
+    if (ft === 'town_map') {
+      const displayVal = entry[config.displayField] || entry.Name || entry._id;
+      const resolved = await this.resolveTownMapPath(entry.Filename);
+      this.previewPanel.show(this.gameRoot, resolved, String(displayVal), 0, { map: true });
+      return;
+    }
+
     const path = getPrimaryGraphic(ft, entry, this.version);
     const displayVal = entry[config.displayField] || entry[config.headerField] || '';
     const fps = await this.getSpriteFps(entry, ft);
@@ -647,38 +742,43 @@ export class PbsEditor {
   }
 
   // ---- Save ----
+  // Each entry goes back to the file it was read from, so an extra file's
+  // entries never get merged into the base file (and vice versa).
+  async saveFileType(ft) {
+    const entries = this.entries[ft];
+    const base = getFilename(ft, this.version);
+    if (!entries || !base) return null;
+
+    const groups = new Map(this.filesFor(ft).map(f => [f, []]));
+    for (const entry of entries) {
+      const fname = groups.has(entry._file) ? entry._file : base;
+      if (!groups.has(fname)) groups.set(fname, []);
+      groups.get(fname).push(entry);
+    }
+    for (const [fname, group] of groups) {
+      await this.ctx.fs.writeProjectFile('PBS/' + fname, writePbsFile(group, ft, this.version));
+    }
+
+    this.dirty.delete(ft);
+    this.originalEntries[ft] = JSON.parse(JSON.stringify(entries));
+    return [...groups.keys()].join(', ');
+  }
+
   async saveCurrentFile() {
     const ft = this.currentFileType;
     if (!ft) return;
-    const entries = this.entries[ft];
-    if (!entries) return;
-
-    const fname = getFilename(ft, this.version);
-    if (!fname) return;
-
     try {
-      const content = writePbsFile(entries, ft, this.version);
-      await this.ctx.fs.writeProjectFile('PBS/' + fname, content);
-      this.dirty.delete(ft);
-      this.originalEntries[ft] = JSON.parse(JSON.stringify(entries));
+      const saved = await this.saveFileType(ft);
+      if (!saved) return;
       this.updateDirtyIndicator();
-      this.ctx.ui.showToast({ message: _t('Saved {file}', { file: fname }), level: 'info' });
+      this.ctx.ui.showToast({ message: _t('Saved {file}', { file: saved }), level: 'info' });
     } catch (e) {
       this.ctx.ui.showToast({ message: _t('Save failed: {error}', { error: e.message }), level: 'error' });
     }
   }
 
   async saveAllDirty() {
-    for (const ft of [...this.dirty]) {
-      const entries = this.entries[ft];
-      if (!entries) continue;
-      const fname = getFilename(ft, this.version);
-      if (!fname) continue;
-      const content = writePbsFile(entries, ft, this.version);
-      await this.ctx.fs.writeProjectFile('PBS/' + fname, content);
-      this.dirty.delete(ft);
-      this.originalEntries[ft] = JSON.parse(JSON.stringify(entries));
-    }
+    for (const ft of [...this.dirty]) await this.saveFileType(ft);
     this.updateDirtyIndicator();
   }
 
@@ -703,8 +803,10 @@ export class PbsEditor {
     const count = entries?.length || 0;
     const filtered = this.getPageEntries().length;
     this.statusCount.textContent = filtered === count ? _t('{count} entries', { count }) : _t('{filtered} / {count}', { filtered, count });
-    const fname = getFilename(ft, this.version);
-    this.statusFile.textContent = fname ? `PBS/${fname}` : '';
+    const files = ft ? this.filesFor(ft) : [];
+    this.statusFile.textContent = files.length
+      ? `PBS/${files[0]}` + (files.length > 1 ? ` +${files.length - 1}` : '')
+      : '';
   }
 
   // ---- CRUD ----
@@ -721,7 +823,10 @@ export class PbsEditor {
     if (!name) return;
 
     const entries = this.entries[ft];
-    const newEntry = { _id: entries.length + 1, _header: name, _excluded: false, Name: name, InternalName: name };
+    const newEntry = {
+      _id: entries.length + 1, _header: name, _excluded: false,
+      _file: getFilename(ft, this.version), Name: name, InternalName: name,
+    };
 
     const allFields = (config.sections || []).flatMap(s => s.fields).concat(config.fields || []);
     for (const f of allFields) {

@@ -32,7 +32,17 @@ function parseSections(raw) {
       const val = t.slice(idx + 1).trim();
       // Repeatable keys (schema "^", e.g. `Evolution`) appear on several lines;
       // flatten them the same way their "*" counterpart is written on one line.
-      data[key] = data[key] ? `${data[key]},${val}` : val;
+      if (key === 'Evolution') {
+        // An evolution entry is a triplet (Species,Method,Param). Methods with no
+        // parameter (e.g. `Trade`) are written as only 2 values. Padding the
+        // missing slot keeps triplet alignment when several `Evolution =` lines
+        // are flattened into one comma-joined string.
+        let value = val;
+        if (value.split(',').length === 2) value += ',';
+        data[key] = data[key] ? `${data[key]},${value}` : value;
+      } else {
+        data[key] = data[key] ? `${data[key]},${val}` : val;
+      }
     }
 
     results.push({ header, data, excluded });
@@ -79,6 +89,32 @@ export const FILE_MAP = {
   town_map:       { 16: 'townmap.txt', 17: 'townmap.txt', 21: 'town_map.txt' },
   tm:             { 16: 'tm.txt', 17: 'tm.txt' },
 };
+
+// Base filenames Essentials compiles but this editor doesn't edit. Listed so a
+// file like `pokemon_metrics.txt` is claimed by its own base instead of being
+// mistaken for an extra `pokemon` file.
+const RESERVED_BASES = [
+  'pokemon_metrics', 'shadow_pokemon', 'berry_plants', 'ribbons',
+  'metadata', 'map_metadata', 'map_connections', 'regional_dexes',
+  'battle_facility_lists', 'dungeon_tilesets', 'dungeon_parameters', 'phone',
+];
+
+// Essentials compiles every PBS file named `<base>.txt` or `<base>_*.txt`, so
+// packs can add entries in their own file without overwriting the base one
+// (Compiler#get_all_pbs_files_to_compile). Longest base name wins the match.
+// Returns the file type a PBS filename belongs to, or null if none.
+export function matchFileType(filename, version) {
+  const name = filename.replace(/\.txt$/i, '');
+  const bases = Object.entries(FILE_MAP)
+    .filter(([, v]) => v[version])
+    .map(([ft, v]) => [v[version].replace(/\.txt$/i, ''), ft])
+    .concat(RESERVED_BASES.map(b => [b, null]))
+    .sort((a, b) => b[0].length - a[0].length);
+  for (const [base, ft] of bases) {
+    if (name === base || name.startsWith(base + '_')) return ft;
+  }
+  return null;
+}
 
 export function getFilename(fileType, version) {
   return FILE_MAP[fileType]?.[version] || null;

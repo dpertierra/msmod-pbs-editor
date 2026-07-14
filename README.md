@@ -13,6 +13,10 @@ directly inside the map editor. Supports v16, v17, and v21 data formats.
    (`ctx.fs.readProjectFile` / `ctx.fs.writeProjectFile`).
 4. Detects the Essentials version from `pokemon.txt` format and lets you switch between
    v16 / v17 / v21 in the toolbar.
+5. Picks up **extra PBS files** the same way the Essentials compiler does: `<base>_*.txt`
+   (e.g. `pokemon_juego.txt`) is loaded alongside `pokemon.txt`, and each entry is saved
+   back to the file it came from, so packs don't get overwritten. The longest base name
+   wins, so `pokemon_metrics.txt` is never mistaken for a `pokemon` extra.
 5. Supports **11 file types**: Pokemon, Pokemon Forms, Moves, Abilities, Items, Types,
    Encounters, Trainers, Trainer Types, Town Map, and TM (v16/v17 only).
 6. Provides typed field editors for each file type — stat bars, EV dropdowns, list editors
@@ -50,7 +54,7 @@ directly inside the map editor. Supports v16, v17, and v21 data formats.
 | Confirm dialogs | `ctx.ui.showConfirmDialog(...)` |
 | Input dialogs | `ctx.ui.showInputDialog(...)` |
 | Toast notifications | `ctx.ui.showToast(...)` |
-| File I/O | `ctx.fs.readProjectFile(...)`, `ctx.fs.writeProjectFile(...)` |
+| File I/O | `ctx.fs.readProjectFile(...)`, `ctx.fs.writeProjectFile(...)`, `ctx.fs.listProjectDir(...)` |
 | Persistent storage | `ctx.storage.get(...)`, `ctx.storage.set(...)` |
 | Game root path | `ctx.editor.gameRoot()` |
 | Tauri IPC | `window.__TAURI__.core.invoke('read_binary_file', ...)` |

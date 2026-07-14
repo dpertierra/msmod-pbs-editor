@@ -236,6 +236,14 @@ export const CSS = `
   background-position: 0 0, 0 6px, 6px -6px, -6px 0px;
   border-radius: 4px;
 }
+.pbs-preview-map {
+  max-width: 100%;
+  max-height: 320px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 4px;
+}
 .pbs-preview-placeholder {
   display: flex;
   flex-direction: column;

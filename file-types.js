@@ -16,6 +16,23 @@ export function typeBadge(typeName) {
   return `<span class="pbs-tag" style="background:${color}22;color:${color}">${typeName}</span>`;
 }
 
+// Standard Pokémon Essentials v21 evolution methods (GameData::Evolution).
+// Populates the Method dropdown in the Evolutions triplet editor. Unknown
+// values found in a PBS file are kept as an extra option, so custom bases
+// that add their own methods are not lost on save.
+export const EVO_METHODS = [
+  'Level', 'MaxLevel', 'MinLevel',
+  'LevelDay', 'LevelNight', 'LevelMorning', 'LevelAfternoon', 'LevelEvening',
+  'LevelDarkness', 'LevelRain', 'LevelSunny',
+  'Happiness', 'MaxHappiness',
+  'Attack', 'Defense', 'AttackGreater', 'DefenseGreater', 'AttackDefenseEqual',
+  'Beauty', 'Location',
+  'Item', 'HasItem',
+  'Trade', 'TradeItem', 'TradeSpecies',
+  'HasMove', 'HasMoveType', 'UseMove',
+  'HasInParty', 'Gender', 'MegaEvo', 'Shedinja',
+];
+
 // ---- Graphics config per file type and version ----
 // Entry can have _id (numeric) or InternalName for substitution.
 
@@ -149,7 +166,7 @@ export const FILE_TYPES = {
         { key: 'EggGroups', label: 'Egg Groups', type: 'list' },
       ]},
       { label: 'Evolution & Other', fields: [
-        { key: 'Evolutions', label: 'Evolutions', type: 'triplets', labels: ['Target', 'Method', 'Param'], refA: 'pokemon' },
+        { key: 'Evolutions', label: 'Evolutions', type: 'triplets', labels: ['Target', 'Method', 'Param'], refA: 'pokemon', methodOptions: EVO_METHODS, paramRef: 'items' },
         { key: 'HatchSteps', label: 'Hatch Steps', type: 'number' },
         { key: 'Height', label: 'Height', type: 'number', step: 0.1 },
         { key: 'Weight', label: 'Weight', type: 'number', step: 0.1 },
@@ -188,7 +205,7 @@ export const FILE_TYPES = {
         { key: 'Moves', label: 'Level Moves', type: 'pairs', pairLabels: ['Level', 'Move'], refB: 'moves' },
         { key: 'TutorMoves', label: 'Tutor Moves', type: 'list', ref: 'moves' },
         { key: 'EggMoves', label: 'Egg Moves', type: 'list', ref: 'moves' },
-        { key: 'Evolutions', label: 'Evolutions', type: 'triplets', labels: ['Target', 'Method', 'Param'], refA: 'pokemon' },
+        { key: 'Evolutions', label: 'Evolutions', type: 'triplets', labels: ['Target', 'Method', 'Param'], refA: 'pokemon', methodOptions: EVO_METHODS, paramRef: 'items' },
       ]},
       { label: 'Other', fields: [
         { key: 'Height', label: 'Height', type: 'number', step: 0.1 },

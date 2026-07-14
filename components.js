@@ -176,7 +176,7 @@ export function createPreviewPanel(loadImageFn) {
     if (_animInterval) { clearInterval(_animInterval); _animInterval = null; }
   }
 
-  function show(gameRoot, path, displayName, fps) {
+  function show(gameRoot, path, displayName, fps, opts = {}) {
     stopAnim();
     panel.innerHTML = '';
     if (!path) {
@@ -221,7 +221,7 @@ export function createPreviewPanel(loadImageFn) {
         const frameH = img.naturalHeight;
         const totalW = img.naturalWidth;
         const frameCount = Math.max(1, Math.round(totalW / frameH));
-        const isSpritesheet = frameCount > 1 && totalW > frameH;
+        const isSpritesheet = !opts.map && frameCount > 1 && totalW > frameH;
 
         if (isSpritesheet) {
           const size = Math.min(128, frameH * 2);
@@ -245,7 +245,7 @@ export function createPreviewPanel(loadImageFn) {
             }, delayMs);
           }
         } else {
-          panel.appendChild(h('img', { className: 'pbs-preview-img', src: url, alt: panelName }));
+          panel.appendChild(h('img', { className: 'pbs-preview-img' + (opts.map ? ' pbs-preview-map' : ''), src: url, alt: panelName }));
           panel.appendChild(h('div', { className: 'pbs-preview-name', textContent: panelName }));
         }
       };
@@ -481,7 +481,9 @@ export function createFieldEditor(fieldDef, value, onChange, refData, ctx, onNav
     const rawItems = (value || '').split(',');
     const trips = [];
     for (let i = 0; i < rawItems.length; i += 3) { if (rawItems[i]) trips.push([rawItems[i]?.trim(), rawItems[i + 1]?.trim(), rawItems[i + 2]?.trim()]); }
-    const editor = createTripletsEditor(trips, fieldDef.labels || ['A', 'B', 'C'], onChange, fieldDef.refA ? getSuggestions(fieldDef.refA) : null, onNavigate, fieldDef.refA);
+    const methodOpts = fieldDef.methodOptions || null;
+    const paramSug = fieldDef.paramRef ? getSuggestions(fieldDef.paramRef) : null;
+    const editor = createTripletsEditor(trips, fieldDef.labels || ['A', 'B', 'C'], onChange, fieldDef.refA ? getSuggestions(fieldDef.refA) : null, onNavigate, fieldDef.refA, methodOpts, paramSug);
     wrap.appendChild(editor.el);
     return { el: wrap, getValue: () => editor.getValue() };
   }
@@ -594,41 +596,72 @@ function createPairsEditor(pairs, labels, onChange, suggestions, onNavigate, ref
 }
 
 // ---- Triplets editor ----
-function createTripletsEditor(trips, labels, onChange, suggestions, onNavigate, refKey) {
+function createTripletsEditor(trips, labels, onChange, suggestions, onNavigate, refKey, methodOptions, paramSuggestions) {
   const container = h('div', { className: 'pbs-list-editor' });
+  const cell = (t, idx) => (t[idx] == null ? '' : t[idx]);
   function render() {
     container.innerHTML = '';
     for (let i = 0; i < trips.length; i++) {
       const row = h('div', { className: 'pbs-list-row' });
-      // First column (with suggestions if provided)
+      // Column 0: Target (species autocomplete if provided)
       if (suggestions) {
-        const ref = createRefInput(trips[i][0] || '', suggestions, (v) => { trips[i][0] = v; emitChange(); });
+        const ref = createRefInput(cell(trips[i], 0), suggestions, (v) => { trips[i][0] = v; emitChange(); });
         ref.el.style.width = '70px';
         ref.el.style.flex = 'none';
         row.appendChild(ref.el);
       } else {
-        const inp = h('input', { value: trips[i][0] || '', placeholder: _t(labels[0]), style: { width: '70px', flex: 'none' } });
+        const inp = h('input', { value: cell(trips[i], 0), placeholder: _t(labels[0]), style: { width: '70px', flex: 'none' } });
         const ii0 = i;
         inp.addEventListener('input', () => { trips[ii0][0] = inp.value; emitChange(); });
         row.appendChild(inp);
       }
-      // Remaining columns
-      for (let j = 1; j < labels.length; j++) {
-        const inp = h('input', { value: trips[i][j] || '', placeholder: _t(labels[j]) });
-        const ii = i, jj = j;
-        inp.addEventListener('input', () => { trips[ii][jj] = inp.value; emitChange(); });
+      // Column 1: Method (dropdown when an option list is provided, else free text).
+      // Unknown current values are appended as an extra option so they survive save.
+      if (methodOptions) {
+        const sel = h('select', { style: { width: '92px', flex: 'none' } });
+        const cur = cell(trips[i], 1);
+        if (!cur) sel.appendChild(h('option', { value: '', textContent: '—' }));
+        let matched = false;
+        for (const opt of methodOptions) {
+          if (opt === cur) matched = true;
+          sel.appendChild(h('option', { value: opt, textContent: opt, selected: opt === cur }));
+        }
+        if (cur && !matched) sel.appendChild(h('option', { value: cur, textContent: cur, selected: true }));
+        if (cur) sel.value = cur;
+        const ii1 = i;
+        sel.addEventListener('change', () => { trips[ii1][1] = sel.value; emitChange(); });
+        row.appendChild(sel);
+      } else {
+        const inp = h('input', { value: cell(trips[i], 1), placeholder: _t(labels[1]), style: { width: '92px', flex: 'none' } });
+        const ii1 = i;
+        inp.addEventListener('input', () => { trips[ii1][1] = inp.value; emitChange(); });
         row.appendChild(inp);
       }
-      const tBtn = goToBtn(refKey, () => trips[i]?.[0] || '', onNavigate);
+      // Column 2: Param (autocomplete when suggestions are provided, else free text)
+      if (paramSuggestions) {
+        const ref = createRefInput(cell(trips[i], 2), paramSuggestions, (v) => { trips[i][2] = v; emitChange(); });
+        ref.el.style.flex = '1';
+        ref.el.style.minWidth = '0';
+        row.appendChild(ref.el);
+      } else {
+        const inp = h('input', { value: cell(trips[i], 2), placeholder: _t(labels[2]), style: { flex: '1', minWidth: '0' } });
+        const ii2 = i;
+        inp.addEventListener('input', () => { trips[ii2][2] = inp.value; emitChange(); });
+        row.appendChild(inp);
+      }
+      const tBtn = goToBtn(refKey, () => cell(trips[i], 0), onNavigate);
       if (tBtn) row.appendChild(tBtn);
       row.appendChild(h('button', { className: 'pbs-list-remove', textContent: '×', onClick: () => { trips.splice(i, 1); render(); emitChange(); } }));
       container.appendChild(row);
     }
     container.appendChild(h('button', { className: 'pbs-list-add', textContent: _t('+ Add'), onClick: () => { trips.push(['', '', '']); render(); } }));
   }
-  function emitChange() { onChange(trips.map(t => `${t[0]},${t[1]},${t[2]}`).join(',')); }
+  // Coerce missing cells to '' so an unset param never serializes as the
+  // literal string "undefined", and drop rows whose target species is empty.
+  const serialize = () => trips.filter(t => cell(t, 0)).map(t => `${cell(t, 0)},${cell(t, 1)},${cell(t, 2)}`).join(',');
+  function emitChange() { onChange(serialize()); }
   render();
-  return { el: container, getValue: () => trips.map(t => `${t[0]},${t[1]},${t[2]}`).join(',') };
+  return { el: container, getValue: serialize };
 }
 
 // ---- Stats editor ----

@@ -481,9 +481,7 @@ export function createFieldEditor(fieldDef, value, onChange, refData, ctx, onNav
     const rawItems = (value || '').split(',');
     const trips = [];
     for (let i = 0; i < rawItems.length; i += 3) { if (rawItems[i]) trips.push([rawItems[i]?.trim(), rawItems[i + 1]?.trim(), rawItems[i + 2]?.trim()]); }
-    const methodOpts = fieldDef.methodOptions || null;
-    const paramSug = fieldDef.paramRef ? getSuggestions(fieldDef.paramRef) : null;
-    const editor = createTripletsEditor(trips, fieldDef.labels || ['A', 'B', 'C'], onChange, fieldDef.refA ? getSuggestions(fieldDef.refA) : null, onNavigate, fieldDef.refA, methodOpts, paramSug);
+    const editor = createTripletsEditor(trips, fieldDef.labels || ['A', 'B', 'C'], onChange, fieldDef.refA ? getSuggestions(fieldDef.refA) : null, onNavigate, fieldDef.refA, refData, !!fieldDef.evolution);
     wrap.appendChild(editor.el);
     return { el: wrap, getValue: () => editor.getValue() };
   }
@@ -596,59 +594,128 @@ function createPairsEditor(pairs, labels, onChange, suggestions, onNavigate, ref
 }
 
 // ---- Triplets editor ----
-function createTripletsEditor(trips, labels, onChange, suggestions, onNavigate, refKey, methodOptions, paramSuggestions) {
+// Build an uppercase internal-name set for a file type (items / pokemon / moves / types).
+function pbsNameSet(refData, key) {
+  const set = new Set();
+  const list = refData && Array.isArray(refData[key]) ? refData[key] : [];
+  for (const e of list) {
+    const n = (e.InternalName || e.Name || '').toUpperCase();
+    if (n) set.add(n);
+  }
+  return set;
+}
+
+// Infer, from how each evolution method is actually used in the loaded PBS
+// data, what KIND of value its parameter takes (item / pokemon / move / type).
+// No hardcoded method list: a method is classified by majority vote of its
+// observed parameters against the project's own name sets. Methods whose
+// parameters are numbers or unrecognized get no autocomplete (free text).
+function buildEvoParamKinds(refData) {
+  const sets = {
+    items: pbsNameSet(refData, 'items'),
+    pokemon: pbsNameSet(refData, 'pokemon'),
+    moves: pbsNameSet(refData, 'moves'),
+    types: pbsNameSet(refData, 'types'),
+  };
+  const paramsByMethod = new Map();
+  const collect = (raw) => {
+    if (!raw) return;
+    const toks = raw.split(',');
+    for (let i = 1; i + 1 < toks.length; i += 3) {
+      const method = (toks[i] || '').trim();
+      if (!method) continue;
+      const param = (toks[i + 1] || '').trim();
+      if (!param) continue;
+      if (!paramsByMethod.has(method)) paramsByMethod.set(method, []);
+      paramsByMethod.get(method).push(param);
+    }
+  };
+  for (const key of ['pokemon', 'pokemon_forms']) {
+    const list = refData && refData[key];
+    if (Array.isArray(list)) for (const e of list) collect(e.Evolutions || e.Evolution || '');
+  }
+  const kindFor = new Map();
+  for (const [method, params] of paramsByMethod) {
+    const votes = { items: 0, pokemon: 0, moves: 0, types: 0 };
+    for (const p of params) {
+      const up = p.toUpperCase();
+      if (sets.items.has(up)) votes.items++;
+      else if (sets.pokemon.has(up)) votes.pokemon++;
+      else if (sets.moves.has(up)) votes.moves++;
+      else if (sets.types.has(up)) votes.types++;
+    }
+    let best = null, bestN = 0, total = 0;
+    for (const k of ['items', 'pokemon', 'moves', 'types']) {
+      total += votes[k];
+      if (votes[k] > bestN) { bestN = votes[k]; best = k; }
+    }
+    if (best && total > 0 && bestN * 2 >= total) kindFor.set(method, best);
+  }
+  return kindFor;
+}
+
+// Names to suggest for a given method's parameter (empty array → free text).
+function evoParamNames(refData, method, kindMap) {
+  const kind = kindMap && kindMap.get(method);
+  if (!kind) return [];
+  return (refData && Array.isArray(refData[kind]) ? refData[kind] : [])
+    .map(e => e.InternalName || e.Name || '').filter(Boolean);
+}
+
+// Scan every Evolutions line in the loaded PBS data and collect the distinct
+// method names actually in use. This is the source of truth (not a hardcoded
+// list), so methods added by custom bases show up automatically.
+function collectEvolutionMethods(refData) {
+  const set = new Set();
+  for (const key of ['pokemon', 'pokemon_forms']) {
+    const list = refData && refData[key];
+    if (!Array.isArray(list)) continue;
+    for (const e of list) {
+      const raw = e.Evolutions || e.Evolution || '';
+      if (!raw) continue;
+      const toks = raw.split(',');
+      for (let i = 1; i < toks.length; i += 3) {
+        const m = (toks[i] || '').trim();
+        if (m) set.add(m);
+      }
+    }
+  }
+  return [...set].sort();
+}
+
+function createTripletsEditor(trips, labels, onChange, suggestions, onNavigate, refKey, refData, isEvolution) {
   const container = h('div', { className: 'pbs-list-editor' });
   const cell = (t, idx) => (t[idx] == null ? '' : t[idx]);
+  const methodList = isEvolution ? collectEvolutionMethods(refData) : [];
+  const paramKindMap = isEvolution ? buildEvoParamKinds(refData) : null;
   function render() {
     container.innerHTML = '';
     for (let i = 0; i < trips.length; i++) {
       const row = h('div', { className: 'pbs-list-row' });
+      const ii = i;
       // Column 0: Target (species autocomplete if provided)
       if (suggestions) {
-        const ref = createRefInput(cell(trips[i], 0), suggestions, (v) => { trips[i][0] = v; emitChange(); });
+        const ref = createRefInput(cell(trips[i], 0), suggestions, (v) => { trips[i][0] = v; emitChange(); }, _t(labels[0]));
         ref.el.style.width = '70px';
         ref.el.style.flex = 'none';
         row.appendChild(ref.el);
       } else {
         const inp = h('input', { value: cell(trips[i], 0), placeholder: _t(labels[0]), style: { width: '70px', flex: 'none' } });
-        const ii0 = i;
-        inp.addEventListener('input', () => { trips[ii0][0] = inp.value; emitChange(); });
+        inp.addEventListener('input', () => { trips[ii][0] = inp.value; emitChange(); });
         row.appendChild(inp);
       }
-      // Column 1: Method (dropdown when an option list is provided, else free text).
-      // Unknown current values are appended as an extra option so they survive save.
-      if (methodOptions) {
-        const sel = h('select', { style: { width: '92px', flex: 'none' } });
-        const cur = cell(trips[i], 1);
-        if (!cur) sel.appendChild(h('option', { value: '', textContent: '—' }));
-        let matched = false;
-        for (const opt of methodOptions) {
-          if (opt === cur) matched = true;
-          sel.appendChild(h('option', { value: opt, textContent: opt, selected: opt === cur }));
-        }
-        if (cur && !matched) sel.appendChild(h('option', { value: cur, textContent: cur, selected: true }));
-        if (cur) sel.value = cur;
-        const ii1 = i;
-        sel.addEventListener('change', () => { trips[ii1][1] = sel.value; emitChange(); });
-        row.appendChild(sel);
-      } else {
-        const inp = h('input', { value: cell(trips[i], 1), placeholder: _t(labels[1]), style: { width: '92px', flex: 'none' } });
-        const ii1 = i;
-        inp.addEventListener('input', () => { trips[ii1][1] = inp.value; emitChange(); });
-        row.appendChild(inp);
-      }
-      // Column 2: Param (autocomplete when suggestions are provided, else free text)
-      if (paramSuggestions) {
-        const ref = createRefInput(cell(trips[i], 2), paramSuggestions, (v) => { trips[i][2] = v; emitChange(); });
-        ref.el.style.flex = '1';
-        ref.el.style.minWidth = '0';
-        row.appendChild(ref.el);
-      } else {
-        const inp = h('input', { value: cell(trips[i], 2), placeholder: _t(labels[2]), style: { flex: '1', minWidth: '0' } });
-        const ii2 = i;
-        inp.addEventListener('input', () => { trips[ii2][2] = inp.value; emitChange(); });
-        row.appendChild(inp);
-      }
+      // Column 1: Method — free-text combo backed by the methods seen in the
+      // data, so a brand-new method can also be typed in.
+      const methodRef = createRefInput(cell(trips[i], 1), methodList, (v) => { trips[ii][1] = v; emitChange(); }, _t(labels[1]));
+      methodRef.el.style.width = '92px';
+      methodRef.el.style.flex = 'none';
+      row.appendChild(methodRef.el);
+      // Column 2: Param — autocomplete kind follows the currently entered method.
+      const paramSrc = isEvolution ? () => evoParamNames(refData, cell(trips[ii], 1), paramKindMap) : [];
+      const paramRef = createRefInput(cell(trips[i], 2), paramSrc, (v) => { trips[ii][2] = v; emitChange(); }, _t(labels[2]));
+      paramRef.el.style.flex = '1';
+      paramRef.el.style.minWidth = '0';
+      row.appendChild(paramRef.el);
       const tBtn = goToBtn(refKey, () => cell(trips[i], 0), onNavigate);
       if (tBtn) row.appendChild(tBtn);
       row.appendChild(h('button', { className: 'pbs-list-remove', textContent: '×', onClick: () => { trips.splice(i, 1); render(); emitChange(); } }));
@@ -1062,15 +1129,19 @@ function closeContextMenu() { if (activeCtxMenu) { activeCtxMenu._cleanup?.(); a
 // ---- Reference autocomplete ----
 // Shows suggestions from loaded PBS entries while typing.
 
-export function createRefInput(value, suggestions, onChange) {
+export function createRefInput(value, suggestions, onChange, placeholder) {
   const wrap = h('div', { style: { position: 'relative' } });
   const input = h('input', {
     type: 'text',
     value: String(value || ''),
     style: { width: '100%' },
   });
+  if (placeholder) input.placeholder = placeholder;
   input.style.cssText += ';padding:3px 6px;border:1px solid var(--border);border-radius:3px;background:var(--input-bg);color:var(--text-primary);font-size:12px;font-family:inherit;outline:none;width:100%;';
   input.addEventListener('focus', () => input.focus?.());
+  // `suggestions` may be a static array or a function returning the current
+  // list (the evolution Param list depends on the selected Method).
+  const getList = () => (typeof suggestions === 'function' ? (suggestions() || []) : (suggestions || []));
 
   const dropdown = h('div', {
     className: 'pbs-ref-dropdown',
@@ -1081,9 +1152,11 @@ export function createRefInput(value, suggestions, onChange) {
   let filtered = [];
 
   function filterItems(q) {
-    if (!q || !suggestions?.length) { filtered = []; return; }
+    const list = getList();
+    if (!list.length) { filtered = []; return; }
+    if (!q) { filtered = list.filter(s => typeof s === 'string').slice(0, 20); return; }
     const lower = q.toLowerCase();
-    filtered = suggestions.filter(s => s.toLowerCase().includes(lower)).slice(0, 20);
+    filtered = list.filter(s => typeof s === 'string' && s.toLowerCase().includes(lower)).slice(0, 20);
   }
 
   function renderDropdown() {

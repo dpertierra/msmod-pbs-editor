@@ -28,12 +28,26 @@ function parseSections(raw) {
       if (t.startsWith('#') || t.startsWith('[') || t === '') continue;
       const idx = t.indexOf('=');
       if (idx === -1) continue;
-      data[t.slice(0, idx).trim()] = t.slice(idx + 1).trim();
+      const key = t.slice(0, idx).trim();
+      const val = t.slice(idx + 1).trim();
+      // Repeatable keys (schema "^", e.g. `Evolution`) appear on several lines;
+      // flatten them the same way their "*" counterpart is written on one line.
+      data[key] = data[key] ? `${data[key]},${val}` : val;
     }
 
     results.push({ header, data, excluded });
   }
   return results;
+}
+
+// Keys the entry model doesn't know about (Generation, Shape, Flags, WildItem*,
+// plugin-added keys...). Kept verbatim so writing back never deletes them.
+function extraKeys(data, entry) {
+  const extra = {};
+  for (const k in data) {
+    if (!(k in entry)) extra[k] = data[k];
+  }
+  return extra;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,7 +108,11 @@ function parsePokemonV21(raw) {
   return parseSections(raw).map((s, i) => {
     const d = s.data;
     if (!d.Name) return null;
-    return {
+    // `Evolution` (singular) is the same data as `Evolutions`; fold it in so it
+    // shows up in the editor instead of being written back out twice.
+    const evolutions = d.Evolutions || d.Evolution || '';
+    delete d.Evolution;
+    const entry = {
       _id: i + 1, _header: s.header, _excluded: s.excluded,
       Name: d.Name, InternalName: s.header,
       Types: d.Types || '', BaseStats: d.BaseStats || '',
@@ -105,13 +123,15 @@ function parsePokemonV21(raw) {
       Abilities: d.Abilities || '', HiddenAbilities: d.HiddenAbilities || '',
       Moves: d.Moves || '', TutorMoves: d.TutorMoves || '',
       EggMoves: d.EggMoves || '', EggGroups: d.EggGroups || '',
-      Evolutions: d.Evolutions || '',
+      Evolutions: evolutions,
       HatchSteps: d.HatchSteps || '', Height: d.Height || '', Weight: d.Weight || '',
       Color: d.Color || '', Category: d.Category || '',
       Habitat: d.Habitat || '', Pokedex: d.Pokedex || '',
       BattlerPlayerY: d.BattlerPlayerY || '', BattlerEnemyY: d.BattlerEnemyY || '',
       BattlerAltitude: d.BattlerAltitude || '',
     };
+    entry._extra = extraKeys(d, entry);
+    return entry;
   }).filter(Boolean);
 }
 
@@ -150,18 +170,22 @@ function parsePokemonFormsV21(raw) {
     const parts = s.header.split(',');
     if (parts.length < 2) return null;
     const d = s.data;
-    return {
+    const evolutions = d.Evolutions || d.Evolution || '';
+    delete d.Evolution;
+    const entry = {
       _id: i + 1, _header: s.header, _excluded: s.excluded,
       InternalName: parts[0], FormIndex: parts[1],
       FormName: d.FormName || '', Name: d.Name || parts[0],
       Types: d.Types || '', BaseStats: d.BaseStats || '',
       Abilities: d.Abilities || '', HiddenAbilities: d.HiddenAbilities || '',
       Moves: d.Moves || '', TutorMoves: d.TutorMoves || '',
-      EggMoves: d.EggMoves || '', Evolutions: d.Evolutions || '',
+      EggMoves: d.EggMoves || '', Evolutions: evolutions,
       Height: d.Height || '', Weight: d.Weight || '',
       Color: d.Color || '', Pokedex: d.Pokedex || '',
       MegaStone: d.MegaStone || '', Region: d.Region || '',
     };
+    entry._extra = extraKeys(d, entry);
+    return entry;
   }).filter(Boolean);
 }
 

@@ -14,6 +14,9 @@ function writeSectionV21(header, fields, keys) {
       out += `${k} = ${fields[k]}\n`;
     }
   }
+  for (const [k, v] of Object.entries(fields._extra || {})) {
+    if (v !== '') out += `${k} = ${v}\n`;
+  }
   out += '\n';
   return out;
 }

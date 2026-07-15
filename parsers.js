@@ -141,15 +141,21 @@ function splitCsvRespectingQuotes(line) {
 // ---- Pokemon ----------------------------------------------------------------
 
 function parsePokemonV21(raw) {
+  const hasSep = /^#-+/m.test(raw);
   return parseSections(raw).map((s, i) => {
     const d = s.data;
     if (!d.Name) return null;
     // `Evolution` (singular) is the same data as `Evolutions`; fold it in so it
     // shows up in the editor instead of being written back out twice.
     const evolutions = d.Evolutions || d.Evolution || '';
+    const evoFormat = d.Evolution !== undefined ? 'multi' : (d.Evolutions !== undefined ? 'single' : null);
+    // Original key order (with singular Evolution normalized) so the writer can
+    // reproduce the file's layout instead of a fixed schema order.
+    const order = Object.keys(d).map(k => k === 'Evolution' ? 'Evolutions' : k);
     delete d.Evolution;
     const entry = {
-      _id: i + 1, _header: s.header, _excluded: s.excluded,
+      _id: i + 1, _header: s.header, _excluded: s.excluded, _evoFormat: evoFormat,
+      _order: order, _sep: hasSep,
       Name: d.Name, InternalName: s.header,
       Types: d.Types || '', BaseStats: d.BaseStats || '',
       HP: '', Atk: '', Def: '', Spe: '', SpAtk: '', SpDef: '',
@@ -202,14 +208,18 @@ function parsePokemonV16(raw) {
 // ---- Pokemon Forms -----------------------------------------------------------
 
 function parsePokemonFormsV21(raw) {
+  const hasSep = /^#-+/m.test(raw);
   return parseSections(raw).map((s, i) => {
     const parts = s.header.split(',');
     if (parts.length < 2) return null;
     const d = s.data;
     const evolutions = d.Evolutions || d.Evolution || '';
+    const evoFormat = d.Evolution !== undefined ? 'multi' : (d.Evolutions !== undefined ? 'single' : null);
+    const order = Object.keys(d).map(k => k === 'Evolution' ? 'Evolutions' : k);
     delete d.Evolution;
     const entry = {
-      _id: i + 1, _header: s.header, _excluded: s.excluded,
+      _id: i + 1, _header: s.header, _excluded: s.excluded, _evoFormat: evoFormat,
+      _order: order, _sep: hasSep,
       InternalName: parts[0], FormIndex: parts[1],
       FormName: d.FormName || '', Name: d.Name || parts[0],
       Types: d.Types || '', BaseStats: d.BaseStats || '',

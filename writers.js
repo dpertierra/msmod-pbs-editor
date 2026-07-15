@@ -7,19 +7,48 @@
 // Key=value section writers (v21 style)
 // ---------------------------------------------------------------------------
 
+// Evolutions round-trip. PE21 hand-written PBS uses repeatable singular
+// `Evolution = SPECIES,METHOD,PARAM` lines (schema "^eeS"); the plural
+// `Evolutions =` is the compiled form the game does NOT read back, so writing
+// it makes evolutions vanish on the next recompile. `_evoFormat` records which
+// form the source file used; default to the canonical multi-line form.
+function writeEvolutions(value, format) {
+  const items = value.split(',').map(s => s.trim());
+  const trips = [];
+  for (let i = 0; i < items.length; i += 3) {
+    if (items[i]) trips.push([items[i], items[i + 1] || '', items[i + 2] || '']);
+  }
+  if (format === 'single') return `Evolutions = ${value}\n`;
+  return trips.map(t => {
+    const parts = t[2] !== '' ? [t[0], t[1], t[2]] : [t[0], t[1]];
+    return `Evolution = ${parts.join(',')}\n`;
+  }).join('');
+}
+
+// `_order` (captured at parse) holds the keys in their original file order so
+// modeled and unmodeled (`_extra`) keys keep their positions instead of being
+// reshuffled into schema order with extras dumped at the end. Falls back to
+// schema order + extras for entries with no recorded order (e.g. newly added).
 function writeSectionV21(header, fields, keys) {
   let out = `[${header}]\n`;
-  for (const k of keys) {
-    if (fields[k] !== undefined && fields[k] !== '') {
-      out += `${k} = ${fields[k]}\n`;
-    }
-  }
-  for (const [k, v] of Object.entries(fields._extra || {})) {
-    if (v !== '') out += `${k} = ${v}\n`;
-  }
+  const extra = fields._extra || {};
+  const written = new Set();
+  const emit = (k) => {
+    if (written.has(k)) return;
+    written.add(k);
+    const v = (k in fields) ? fields[k] : extra[k];
+    if (v === undefined || v === '') return;
+    if (k === 'Evolutions') { out += writeEvolutions(v, fields._evoFormat); return; }
+    out += `${k} = ${v}\n`;
+  };
+  if (fields._order) for (const k of fields._order) emit(k);
+  for (const k of keys) emit(k);
+  for (const k of Object.keys(extra)) emit(k);
   out += '\n';
   return out;
 }
+
+const SECTION_SEP = '#-------------------------------\n';
 
 // ---------------------------------------------------------------------------
 // Pokemon
@@ -43,11 +72,26 @@ const POKEMON_V16_KEYS = [
   'Habitat', 'Pokedex', 'BattlerPlayerY', 'BattlerEnemyY', 'BattlerAltitude',
 ];
 
-function writePokemonV21(entries) {
+// Separator-style files (canonical PE21) put `#---` directly before each
+// section with no blank lines; blank-line-style files use blank lines and no
+// separators. Detect from `_sep` and reproduce the matching layout.
+function joinSectionsV21(entries, keys) {
+  const sep = entries.length && entries[0]._sep;
+  if (sep) {
+    return entries.map(e => {
+      const header = e._header + (e._excluded ? '!exclude' : '');
+      const sec = writeSectionV21(header, e, keys).replace(/\n+$/, '\n');
+      return SECTION_SEP + sec;
+    }).join('');
+  }
   return entries.map(e => {
     const header = e._header + (e._excluded ? '!exclude' : '');
-    return writeSectionV21(header, e, POKEMON_V21_KEYS);
+    return writeSectionV21(header, e, keys);
   }).join('\n');
+}
+
+function writePokemonV21(entries) {
+  return joinSectionsV21(entries, POKEMON_V21_KEYS);
 }
 
 function writePokemonV16(entries) {
@@ -88,10 +132,7 @@ const FORMS_V21_KEYS = [
 ];
 
 function writePokemonFormsV21(entries) {
-  return entries.map(e => {
-    const header = e._header + (e._excluded ? '!exclude' : '');
-    return writeSectionV21(header, e, FORMS_V21_KEYS);
-  }).join('\n');
+  return joinSectionsV21(entries, FORMS_V21_KEYS);
 }
 
 function writePokemonFormsV17(entries) {
